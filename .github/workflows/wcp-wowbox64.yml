@@ -1,0 +1,147 @@
+name: WCP (WOWBox64)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      VERSION:
+        description: Optional upstream Box64 tag override
+        required: false
+        type: string
+      LLVM_TAG:
+        description: Optional llvm-mingw tag override
+        required: false
+        type: string
+      FORCE_MODE:
+        description: Force rebuild
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -Eeuo pipefail {0}
+
+env:
+  system32: '${system32}'
+  UPSTREAM_REPO: ptitSeb/box64
+
+jobs:
+  build-wcp:
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl jq zstd cmake make python3 libzydis-dev gcc-aarch64-linux-gnu
+
+      - name: Resolve version + llvm-mingw + PKG
+        env:
+          VERSION_INPUT: ${{ inputs.VERSION }}
+          LLVM_TAG_INPUT: ${{ inputs.LLVM_TAG }}
+        run: |
+          if [[ -n "$VERSION_INPUT" ]]; then
+            VER="$VERSION_INPUT"
+          else
+            VER=$(curl -fsSL "https://api.github.com/repos/${UPSTREAM_REPO}/tags?per_page=1" | jq -r '.[0].name // empty')
+            [[ -n "$VER" ]] || VER="0.0.0"
+          fi
+          VER="${VER#v}"
+
+          if [[ -n "$LLVM_TAG_INPUT" ]]; then
+            LLVM_RELEASE=$(curl -fsSL "https://api.github.com/repos/mstorsjo/llvm-mingw/releases/tags/${LLVM_TAG_INPUT}")
+          else
+            LLVM_RELEASE=$(curl -fsSL "https://api.github.com/repos/mstorsjo/llvm-mingw/releases/latest")
+          fi
+          LLVM_TAG=$(jq -r '.tag_name' <<< "$LLVM_RELEASE")
+          ASSET_URL=$(jq -r 'first(.assets[] | select(.name | test("ucrt.*ubuntu.*aarch64\\.tar\\.xz$")) | .browser_download_url)' <<< "$LLVM_RELEASE")
+          [[ -n "$ASSET_URL" ]] || (echo "No llvm-mingw aarch64 archive found for ${LLVM_TAG}" >&2; exit 1)
+
+          COMMIT=$(git rev-parse --short=8 HEAD)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "detached")
+          SAFE_BRANCH=$(echo "$BRANCH" | tr '/' '-')
+
+          if [[ "$BRANCH" == "main" ]]; then
+            PKG="wowbox64-${VER}-${COMMIT}"
+          else
+            PKG="wowbox64-${VER}-${COMMIT}-${SAFE_BRANCH}"
+          fi
+
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          echo "LLVM_TAG=$LLVM_TAG" >> "$GITHUB_ENV"
+          echo "LLVM_URL=$ASSET_URL" >> "$GITHUB_ENV"
+          echo "COMMIT=$COMMIT" >> "$GITHUB_ENV"
+          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+          echo "PKG=$PKG" >> "$GITHUB_ENV"
+
+      - name: Check existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_MODE: ${{ inputs.FORCE_MODE }}
+        run: |
+          if gh release view "$PKG" >/dev/null 2>&1 && [[ "$FORCE_MODE" != "true" ]]; then
+            echo "SKIP_RELEASE=true" >> "$GITHUB_ENV"
+          else
+            echo "SKIP_RELEASE=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Download llvm-mingw
+        if: env.SKIP_RELEASE != 'true'
+        run: |
+          curl -fsSL "$LLVM_URL" -o llvm-mingw.tar.xz
+          mkdir llvm-mingw
+          tar -xf llvm-mingw.tar.xz -C llvm-mingw --strip-components=1
+          echo "$PWD/llvm-mingw/bin" >> "$GITHUB_PATH"
+
+      - name: Build WOW64
+        if: env.SKIP_RELEASE != 'true'
+        run: |
+          export PATH="$PWD/llvm-mingw/bin:$PATH"
+          mkdir -p build && cd build
+          cmake .. \
+            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+            -DWOW64=1 -DARM_DYNAREC=1 \
+            -DCMAKE_BUILD_TYPE=Release
+          make -j"$(nproc)"
+
+      - name: Create Package (WCP)
+        if: env.SKIP_RELEASE != 'true'
+        run: |
+          mkdir -p pkg/system32
+          cp build/wowbox64.dll pkg/system32/wowbox64.dll
+
+          cat > pkg/profile.json << JSONEOF
+          {
+            "type": "WOWBox64",
+            "versionName": "${VER}-${COMMIT}",
+            "versionCode": 0,
+            "description": "Built on the Winlator WCP Hub (Upstream: ptitSeb)",
+            "files": [
+              { "source": "wowbox64.dll", "target": "${system32}/wowbox64.dll" }
+            ]
+          }
+          JSONEOF
+
+          cd pkg && tar --zstd -cf "../${PKG}.wcp" . && cd ..
+
+      - name: Publish Release
+        if: env.SKIP_RELEASE != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_MODE: ${{ inputs.FORCE_MODE }}
+        run: |
+          if gh release view "$PKG" >/dev/null 2>&1; then
+            if [[ "$FORCE_MODE" != "true" ]]; then exit 0; fi
+            gh release delete "$PKG" --yes --cleanup-tag
+          fi
+          gh release create "$PKG" "${PKG}.wcp" \
+            --title "$PKG" \
+            --notes "WOWBox64 ${VER} (branch: ${BRANCH}, commit: ${COMMIT}) built with llvm-mingw ${LLVM_TAG}"
