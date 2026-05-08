@@ -1,0 +1,122 @@
+name: WCP (Box64)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      VERSION:
+        description: Optional upstream Box64 tag override
+        required: false
+        type: string
+      FORCE_MODE:
+        description: Force rebuild
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -Eeuo pipefail {0}
+
+env:
+  bindir: '${bindir}'
+  UPSTREAM_REPO: ptitSeb/box64
+
+jobs:
+  build-wcp:
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl jq zstd cmake make python3 patchelf libzydis-dev gcc-aarch64-linux-gnu
+
+      - name: Resolve version + PKG
+        env:
+          VERSION_INPUT: ${{ inputs.VERSION }}
+        run: |
+          if [[ -n "$VERSION_INPUT" ]]; then
+            VER="$VERSION_INPUT"
+          else
+            VER=$(curl -fsSL "https://api.github.com/repos/${UPSTREAM_REPO}/tags?per_page=1" | jq -r '.[0].name // empty')
+            [[ -n "$VER" ]] || VER="0.0.0"
+          fi
+          VER="${VER#v}"
+
+          COMMIT=$(git rev-parse --short=8 HEAD)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "detached")
+          SAFE_BRANCH=$(echo "$BRANCH" | tr '/' '-')
+
+          if [[ "$BRANCH" == "main" ]]; then
+            PKG="box64-${VER}-${COMMIT}"
+          else
+            PKG="box64-${VER}-${COMMIT}-${SAFE_BRANCH}"
+          fi
+
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          echo "COMMIT=$COMMIT" >> "$GITHUB_ENV"
+          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+          echo "PKG=$PKG" >> "$GITHUB_ENV"
+
+      - name: Check existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_MODE: ${{ inputs.FORCE_MODE }}
+        run: |
+          if gh release view "$PKG" >/dev/null 2>&1 && [[ "$FORCE_MODE" != "true" ]]; then
+            echo "SKIP_RELEASE=true" >> "$GITHUB_ENV"
+          else
+            echo "SKIP_RELEASE=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build Box64 (ANDROID_GLIBC style)
+        if: env.SKIP_RELEASE != 'true'
+        run: |
+          mkdir -p build && cd build
+          cmake .. \
+            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+            -DARM64=1 -DWINLATOR_GLIBC=1 -DARM_DYNAREC=1 -DBAD_SIGNAL=1 \
+            -DCMAKE_BUILD_TYPE=Release
+          make -j"$(nproc)"
+
+      - name: Create Package (WCP)
+        if: env.SKIP_RELEASE != 'true'
+        run: |
+          mkdir -p pkg
+          cp build/box64 pkg/box64
+
+          cat > pkg/profile.json << JSONEOF
+          {
+            "type": "Box64",
+            "versionName": "${VER}-${COMMIT}",
+            "versionCode": 0,
+            "description": "Built on the Winlator WCP Hub (Upstream: ptitSeb)",
+            "files": [
+              { "source": "box64", "target": "${bindir}/box64" }
+            ]
+          }
+          JSONEOF
+
+          cd pkg && tar --zstd -cf "../${PKG}.wcp" . && cd ..
+
+      - name: Publish Release
+        if: env.SKIP_RELEASE != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_MODE: ${{ inputs.FORCE_MODE }}
+        run: |
+          if gh release view "$PKG" >/dev/null 2>&1; then
+            if [[ "$FORCE_MODE" != "true" ]]; then exit 0; fi
+            gh release delete "$PKG" --yes --cleanup-tag
+          fi
+          gh release create "$PKG" "${PKG}.wcp" \
+            --title "$PKG" \
+            --notes "Box64 ${VER} (branch: ${BRANCH}, commit: ${COMMIT})"
