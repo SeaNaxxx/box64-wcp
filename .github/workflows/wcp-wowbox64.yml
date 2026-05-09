@@ -110,13 +110,13 @@ jobs:
             -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
             -DWOW64=1 -DARM_DYNAREC=1 \
             -DCMAKE_BUILD_TYPE=Release
-          make -j"$(nproc)"
+          make -j"$(nproc)" wowbox64
 
       - name: Create Package (WCP)
         if: env.SKIP_RELEASE != 'true'
         run: |
           mkdir -p pkg/system32
-          cp build/wowbox64.dll pkg/system32/wowbox64.dll
+          cp build/wowbox64-prefix/src/wowbox64-build/wowbox64.dll pkg/system32/wowbox64.dll
 
           cat > pkg/profile.json << JSONEOF
           {
@@ -125,7 +125,7 @@ jobs:
             "versionCode": 0,
             "description": "Built on the Winlator WCP Hub (Upstream: ptitSeb)",
             "files": [
-              { "source": "wowbox64.dll", "target": "${system32}/wowbox64.dll" }
+              { "source": "system32/wowbox64.dll", "target": "${system32}/wowbox64.dll" }
             ]
           }
           JSONEOF
