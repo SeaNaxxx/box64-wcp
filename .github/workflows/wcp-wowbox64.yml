@@ -123,7 +123,7 @@ jobs:
             "type": "WOWBox64",
             "versionName": "${VER}-${COMMIT}",
             "versionCode": 0,
-            "description": "Built on the Winlator WCP Hub (Upstream: ptitSeb)",
+            "description": "wowbox64",
             "files": [
               { "source": "system32/wowbox64.dll", "target": "${system32}/wowbox64.dll" }
             ]
