@@ -92,7 +92,7 @@ jobs:
           mkdir -p build && cd build
           cmake .. \
             -DCMAKE_C_COMPILER=${{ env.BOX64_COMPILER }} \
-            -DANDROID=1 -DARM_DYNAREC=1 -DBAD_SIGNAL=1 \
+            -DANDROID=1 -DWINLATOR_GLIBC=1 -DARM_DYNAREC=1 -DBAD_SIGNAL=1 \
             -DCMAKE_BUILD_TYPE=Release
           make -j"$(nproc)"
 
