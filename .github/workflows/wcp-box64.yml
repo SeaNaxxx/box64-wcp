@@ -98,7 +98,7 @@ jobs:
             "type": "Box64",
             "versionName": "${VER}-${COMMIT}",
             "versionCode": 0,
-            "description": "Built on the Winlator WCP Hub (Upstream: ptitSeb)",
+            "description": "box64",
             "files": [
               { "source": "box64", "target": "${bindir}/box64" }
             ]
