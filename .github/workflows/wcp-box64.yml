@@ -28,7 +28,7 @@ env:
 
 jobs:
   build-wcp:
-    runs-on: ubuntu-22.04-arm
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,7 +37,16 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl jq zstd cmake make python3 patchelf libzydis-dev gcc-aarch64-linux-gnu
+          sudo apt-get install -y git cmake make python3 wget unzip xz-utils zstd curl jq
+
+      - name: Setup Android NDK
+        run: |
+          if [ ! -d "$PWD/android-ndk-r26b" ]; then
+            wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
+            unzip -q android-ndk-r26b-linux.zip
+          fi
+          echo "ANDROID_NDK_HOME=$PWD/android-ndk-r26b" >> "$GITHUB_ENV"
+          echo "BOX64_COMPILER=$PWD/android-ndk-r26b/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang" >> "$GITHUB_ENV"
 
       - name: Resolve version + PKG
         env:
@@ -77,15 +86,20 @@ jobs:
             echo "SKIP_RELEASE=false" >> "$GITHUB_ENV"
           fi
 
-      - name: Build Box64 (ANDROID_GLIBC style)
+      - name: Build Box64
         if: env.SKIP_RELEASE != 'true'
         run: |
           mkdir -p build && cd build
           cmake .. \
-            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
-            -DARM64=1 -DWINLATOR_GLIBC=1 -DARM_DYNAREC=1 -DBAD_SIGNAL=1 \
+            -DCMAKE_C_COMPILER=${{ env.BOX64_COMPILER }} \
+            -DANDROID=1 -DARM_DYNAREC=1 -DBAD_SIGNAL=1 \
             -DCMAKE_BUILD_TYPE=Release
           make -j"$(nproc)"
+
+      - name: Strip binary
+        if: env.SKIP_RELEASE != 'true'
+        run: |
+          ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip build/box64
 
       - name: Create Package (WCP)
         if: env.SKIP_RELEASE != 'true'

@@ -32,7 +32,7 @@ env:
 
 jobs:
   build-wcp:
-    runs-on: ubuntu-22.04-arm
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,9 +41,16 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl jq zstd cmake make python3 libzydis-dev gcc-aarch64-linux-gnu
+          sudo apt-get install -y git cmake make python3 wget xz-utils zstd curl jq
 
-      - name: Resolve version + llvm-mingw + PKG
+      - name: Setup LLVM-MinGW
+        run: |
+          LLVM_MINGW_TAG="20240619"
+          wget -q "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_TAG}/llvm-mingw-${LLVM_MINGW_TAG}-ucrt-ubuntu-20.04-x86_64.tar.xz" -O llvm-mingw.tar.xz
+          tar -xf llvm-mingw.tar.xz
+          echo "MINGW_PATH=$PWD/llvm-mingw-${LLVM_MINGW_TAG}-ucrt-ubuntu-20.04-x86_64/bin" >> "$GITHUB_ENV"
+
+      - name: Resolve version + PKG
         env:
           VERSION_INPUT: ${{ inputs.VERSION }}
           LLVM_TAG_INPUT: ${{ inputs.LLVM_TAG }}
@@ -57,13 +64,10 @@ jobs:
           VER="${VER#v}"
 
           if [[ -n "$LLVM_TAG_INPUT" ]]; then
-            LLVM_RELEASE=$(curl -fsSL "https://api.github.com/repos/mstorsjo/llvm-mingw/releases/tags/${LLVM_TAG_INPUT}")
+            LLVM_TAG="$LLVM_TAG_INPUT"
           else
-            LLVM_RELEASE=$(curl -fsSL "https://api.github.com/repos/mstorsjo/llvm-mingw/releases/latest")
+            LLVM_TAG="20240619"
           fi
-          LLVM_TAG=$(jq -r '.tag_name' <<< "$LLVM_RELEASE")
-          ASSET_URL=$(jq -r 'first(.assets[] | select(.name | test("ucrt.*ubuntu.*aarch64\\.tar\\.xz$")) | .browser_download_url)' <<< "$LLVM_RELEASE")
-          [[ -n "$ASSET_URL" ]] || (echo "No llvm-mingw aarch64 archive found for ${LLVM_TAG}" >&2; exit 1)
 
           COMMIT=$(git rev-parse --short=8 HEAD)
           BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "detached")
@@ -77,7 +81,6 @@ jobs:
 
           echo "VER=$VER" >> "$GITHUB_ENV"
           echo "LLVM_TAG=$LLVM_TAG" >> "$GITHUB_ENV"
-          echo "LLVM_URL=$ASSET_URL" >> "$GITHUB_ENV"
           echo "COMMIT=$COMMIT" >> "$GITHUB_ENV"
           echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
           echo "PKG=$PKG" >> "$GITHUB_ENV"
@@ -93,21 +96,19 @@ jobs:
             echo "SKIP_RELEASE=false" >> "$GITHUB_ENV"
           fi
 
-      - name: Download llvm-mingw
+      - name: Patch wine/common/crt.c
         if: env.SKIP_RELEASE != 'true'
         run: |
-          curl -fsSL "$LLVM_URL" -o llvm-mingw.tar.xz
-          mkdir llvm-mingw
-          tar -xf llvm-mingw.tar.xz -C llvm-mingw --strip-components=1
-          echo "$PWD/llvm-mingw/bin" >> "$GITHUB_PATH"
+          mkdir -p wine/common
+          echo -e '\nint __mingw_vsprintf(char* buffer, const char* format, va_list args) { return vsprintf(buffer, format, args); }' >> wine/common/crt.c
 
       - name: Build WOW64
         if: env.SKIP_RELEASE != 'true'
         run: |
-          export PATH="$PWD/llvm-mingw/bin:$PATH"
+          export PATH="$PATH:${{ env.MINGW_PATH }}"
           mkdir -p build && cd build
           cmake .. \
-            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+            -DCMAKE_C_COMPILER=aarch64-w64-mingw32-gcc \
             -DWOW64=1 -DARM_DYNAREC=1 \
             -DCMAKE_BUILD_TYPE=Release
           make -j"$(nproc)" wowbox64
