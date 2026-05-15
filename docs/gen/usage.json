@@ -1030,6 +1030,29 @@
     ]
   },
   {
+    "name": "BOX64_DYNACACHE_COMPRESS",
+    "description": "Compress or not DynaCache files on disk",
+    "category": "Fragile or Legacy",
+    "wine": false,
+    "options": [
+      {
+        "key": "0",
+        "description": "Do not compress dynacache files",
+        "default": false
+      },
+      {
+        "key": "1",
+        "description": "Compress dynacache files using Zlib with fastest compression.",
+        "default": true
+      },
+      {
+        "key": "2",
+        "description": "Compress dynacache files using ZLib with default compression.",
+        "default": false
+      }
+    ]
+  },
+  {
     "name": "BOX64_DYNACACHE_MIN",
     "description": "Minimum size, in KB, for a DynaCache to be written to disk. Default size is 350KB",
     "category": "Fragile or Legacy",

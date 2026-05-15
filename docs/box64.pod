@@ -478,6 +478,15 @@ Maximum size, in MiB, for the DynaCache folder. When the limit is exceeded, inva
  * 2048 : A size of 2048 MiB is the default value. [Default]
 
 
+=item B<BOX64_DYNACACHE_COMPRESS> =I<0|1|2>
+
+Compress or not DynaCache files on disk
+
+ * 0 : Do not compress dynacache files 
+ * 1 : Compress dynacache files using Zlib with fastest compression. [Default]
+ * 2 : Compress dynacache files using ZLib with default compression. 
+
+
 =item B<BOX64_DYNACACHE_MIN> =I<XXXX|350>
 
 Minimum size, in KB, for a DynaCache to be written to disk. Default size is 350KB

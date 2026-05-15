@@ -26,6 +26,7 @@
 #include "dynarec/dynablock_private.h"
 #include "dynarec/native_lock.h"
 #include "dynarec/dynarec_next.h"
+#include "dynacache_compress.h"
 #include "freq.h"
 
 // init inside dynablocks.c
@@ -1433,25 +1434,13 @@ size_t MmaplistTotalAlloc(mmaplist_t* list)
 
 int ApplyRelocs(dynablock_t* block, intptr_t delta_block, intptr_t delat_map, uintptr_t mapping_start);
 uintptr_t RelocGetNext();
-int MmaplistAddBlock(mmaplist_t* list, int fd, off_t offset, void* orig, size_t size, intptr_t delta_map, uintptr_t mapping_start)
+int MmaplistAddBlock_internal(mmaplist_t* list, void* map, void* orig, size_t size, intptr_t delta_map, uintptr_t mapping_start)
 {
-    if(!list) return -1;
     if(list->cap==list->size) {
         list->cap += 4;
         list->chunks = box_realloc(list->chunks, list->cap*sizeof(blocklist_t**));
     }
     int i = list->size++;
-    void* map = MAP_FAILED;
-    #ifdef BOX32
-    if(box64_is32bits)
-        map = box32_dynarec_mmap(size, fd, offset);
-    #endif
-    if(map==MAP_FAILED)
-        map = InternalMmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE, fd, offset);
-    if(map==MAP_FAILED) {
-        printf_log(LOG_INFO, "Failed to load block %d of a maplist\n", i);
-        return -3;
-    }
     #ifdef MADV_HUGEPAGE
     madvise(map, size, MADV_HUGEPAGE);
     #endif
@@ -1538,13 +1527,53 @@ int MmaplistAddBlock(mmaplist_t* list, int fd, off_t offset, void* orig, size_t 
     return 0;
 }
 
-void MmaplistFillBlocks(mmaplist_t* list, DynaCacheBlock_t* blocks)
+int MmaplistAddBlock(mmaplist_t* list, int fd, off_t offset, void* orig, size_t size, intptr_t delta_map, uintptr_t mapping_start)
+{
+    if(!list) return -1;
+    void* map = MAP_FAILED;
+    #ifdef BOX32
+    if(box64_is32bits)
+        map = box32_dynarec_mmap(size, fd, offset);
+    #endif
+    if(map==MAP_FAILED)
+        map = InternalMmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE, fd, offset);
+    if(map==MAP_FAILED) {
+        printf_log(LOG_INFO, "Failed to Mmap a block of a maplist\n");
+        return -3;
+    }
+    return MmaplistAddBlock_internal(list, map, orig, size, delta_map, mapping_start);
+}
+#ifndef WIN32
+int MmaplistAddCompressedBlock(mmaplist_t* list, int type, void* src, size_t src_size, void* orig, size_t size, intptr_t delta_map, uintptr_t mapping_start)
+{
+    if(!list) return -1;
+    void* map = MAP_FAILED;
+    #ifdef BOX32
+    if(box64_is32bits)
+        map = box32_dynarec_mmap(size, -1, 0);
+    #endif
+    if(map==MAP_FAILED)
+        map = InternalMmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+    if(map==MAP_FAILED) {
+        printf_log(LOG_INFO, "Failed to Alloc a block of a maplist\n");
+        return -3;
+    }
+    if(dc_uncompress(src, src_size, type, map, size)) {
+        printf_log(LOG_INFO, "Failed to Uncompress a block of a maplist\n");
+        return -3;
+    }
+    return MmaplistAddBlock_internal(list, map, orig, size, delta_map, mapping_start);
+}
+#endif
+void MmaplistFillBlocks(mmaplist_t* list, CompressedDynaCacheBlock_t* blocks)
 {
     if(!list) return;
     for(int i=0; i<list->size; ++i) {
-        blocks[i].block = list->chunks[i];
-        blocks[i].size = list->chunks[i]->size+sizeof(blocklist_t);
-        blocks[i].free_size = list->chunks[i]->maxfree;
+        blocks[i].block.block = list->chunks[i];
+        blocks[i].block.size = list->chunks[i]->size+sizeof(blocklist_t);
+        blocks[i].block.free_size = list->chunks[i]->maxfree;
+        blocks[i].compsize = 0;
+        blocks[i].type = COMP_NONE;
     }
 }
 
