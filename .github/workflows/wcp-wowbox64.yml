@@ -69,7 +69,15 @@ jobs:
             LLVM_TAG="20240619"
           fi
 
-          COMMIT=$(git rev-parse --short=8 HEAD)
+          # Use .upstream-commit if available (from sync workflow), otherwise fall back to HEAD
+          if [[ -f .upstream-commit ]]; then
+            FULL_COMMIT=$(cat .upstream-commit)
+            COMMIT=$(echo "$FULL_COMMIT" | cut -c1-8)
+          else
+            COMMIT=$(git rev-parse --short=8 HEAD)
+            FULL_COMMIT=$(git rev-parse HEAD)
+          fi
+
           BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "detached")
           SAFE_BRANCH=$(echo "$BRANCH" | tr '/' '-')
 
@@ -82,6 +90,7 @@ jobs:
           echo "VER=$VER" >> "$GITHUB_ENV"
           echo "LLVM_TAG=$LLVM_TAG" >> "$GITHUB_ENV"
           echo "COMMIT=$COMMIT" >> "$GITHUB_ENV"
+          echo "FULL_COMMIT=$FULL_COMMIT" >> "$GITHUB_ENV"
           echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
           echo "PKG=$PKG" >> "$GITHUB_ENV"
 
@@ -143,6 +152,23 @@ jobs:
             if [[ "$FORCE_MODE" != "true" ]]; then exit 0; fi
             gh release delete "$PKG" --yes --cleanup-tag
           fi
+          BUILD_DATE=$(date -u +"%Y-%m-%d %H:%M UTC")
+          UPSTREAM_LINK="https://github.com/${UPSTREAM_REPO}/commit/${FULL_COMMIT}"
+
+          if [[ "$BRANCH" == "main" ]]; then
+            CHANGELOG_LINK="https://github.com/${UPSTREAM_REPO}/commits/${FULL_COMMIT}"
+          else
+            CHANGELOG_LINK="https://github.com/${UPSTREAM_REPO}/commits/${BRANCH}"
+          fi
+
           gh release create "$PKG" "${PKG}.wcp" \
             --title "$PKG" \
-            --notes "WOWBox64 ${VER} (branch: ${BRANCH}, commit: ${COMMIT}) built with llvm-mingw ${LLVM_TAG}"
+            --notes "## WOWBox64 ${VER}
+
+          **Commit:** [${UPSTREAM_REPO}@${COMMIT}](${UPSTREAM_LINK})
+          **Branch:** ${BRANCH}
+          **llvm-mingw:** ${LLVM_TAG}
+          **Built:** ${BUILD_DATE}
+
+          ---
+          **Full Changelog:** ${CHANGELOG_LINK}"
