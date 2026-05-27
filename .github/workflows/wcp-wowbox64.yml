@@ -1,0 +1,174 @@
+name: WCP (WOWBox64)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      VERSION:
+        description: Optional upstream Box64 tag override
+        required: false
+        type: string
+      LLVM_TAG:
+        description: Optional llvm-mingw tag override
+        required: false
+        type: string
+      FORCE_MODE:
+        description: Force rebuild
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -Eeuo pipefail {0}
+
+env:
+  system32: '${system32}'
+  UPSTREAM_REPO: ptitSeb/box64
+
+jobs:
+  build-wcp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git cmake make python3 wget xz-utils zstd curl jq
+
+      - name: Setup LLVM-MinGW
+        run: |
+          LLVM_MINGW_TAG="20240619"
+          wget -q "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_TAG}/llvm-mingw-${LLVM_MINGW_TAG}-ucrt-ubuntu-20.04-x86_64.tar.xz" -O llvm-mingw.tar.xz
+          tar -xf llvm-mingw.tar.xz
+          echo "MINGW_PATH=$PWD/llvm-mingw-${LLVM_MINGW_TAG}-ucrt-ubuntu-20.04-x86_64/bin" >> "$GITHUB_ENV"
+
+      - name: Resolve version + PKG
+        env:
+          VERSION_INPUT: ${{ inputs.VERSION }}
+          LLVM_TAG_INPUT: ${{ inputs.LLVM_TAG }}
+        run: |
+          if [[ -n "$VERSION_INPUT" ]]; then
+            VER="$VERSION_INPUT"
+          else
+            VER=$(curl -fsSL "https://api.github.com/repos/${UPSTREAM_REPO}/tags?per_page=1" | jq -r '.[0].name // empty')
+            [[ -n "$VER" ]] || VER="0.0.0"
+          fi
+          VER="${VER#v}"
+
+          if [[ -n "$LLVM_TAG_INPUT" ]]; then
+            LLVM_TAG="$LLVM_TAG_INPUT"
+          else
+            LLVM_TAG="20240619"
+          fi
+
+          # Use .upstream-commit if available (from sync workflow), otherwise fall back to HEAD
+          if [[ -f .upstream-commit ]]; then
+            FULL_COMMIT=$(cat .upstream-commit)
+            COMMIT=$(echo "$FULL_COMMIT" | cut -c1-8)
+          else
+            COMMIT=$(git rev-parse --short=8 HEAD)
+            FULL_COMMIT=$(git rev-parse HEAD)
+          fi
+
+          BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "detached")
+          SAFE_BRANCH=$(echo "$BRANCH" | tr '/' '-')
+
+          if [[ "$BRANCH" == "main" ]]; then
+            PKG="wowbox64-${VER}-${COMMIT}"
+          else
+            PKG="wowbox64-${VER}-${COMMIT}-${SAFE_BRANCH}"
+          fi
+
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          echo "LLVM_TAG=$LLVM_TAG" >> "$GITHUB_ENV"
+          echo "COMMIT=$COMMIT" >> "$GITHUB_ENV"
+          echo "FULL_COMMIT=$FULL_COMMIT" >> "$GITHUB_ENV"
+          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+          echo "PKG=$PKG" >> "$GITHUB_ENV"
+
+      - name: Check existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_MODE: ${{ inputs.FORCE_MODE }}
+        run: |
+          if gh release view "$PKG" >/dev/null 2>&1 && [[ "$FORCE_MODE" != "true" ]]; then
+            echo "SKIP_RELEASE=true" >> "$GITHUB_ENV"
+          else
+            echo "SKIP_RELEASE=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Patch wine/common/crt.c
+        if: env.SKIP_RELEASE != 'true'
+        run: |
+          mkdir -p wine/common
+          echo -e '\nint __mingw_vsprintf(char* buffer, const char* format, va_list args) { return vsprintf(buffer, format, args); }' >> wine/common/crt.c
+
+      - name: Build WOW64
+        if: env.SKIP_RELEASE != 'true'
+        run: |
+          export PATH="$PATH:${{ env.MINGW_PATH }}"
+          mkdir -p build && cd build
+          cmake .. \
+            -DCMAKE_C_COMPILER=aarch64-w64-mingw32-gcc \
+            -DWOW64=1 -DARM_DYNAREC=1 \
+            -DCMAKE_BUILD_TYPE=Release
+          make -j"$(nproc)" wowbox64
+
+      - name: Create Package (WCP)
+        if: env.SKIP_RELEASE != 'true'
+        run: |
+          mkdir -p pkg/system32
+          cp build/wowbox64-prefix/src/wowbox64-build/wowbox64.dll pkg/system32/wowbox64.dll
+
+          cat > pkg/profile.json << JSONEOF
+          {
+            "type": "WOWBox64",
+            "versionName": "${VER}-${COMMIT}",
+            "versionCode": 0,
+            "description": "wowbox64",
+            "files": [
+              { "source": "system32/wowbox64.dll", "target": "${system32}/wowbox64.dll" }
+            ]
+          }
+          JSONEOF
+
+          cd pkg && tar --zstd -cf "../${PKG}.wcp" . && cd ..
+
+      - name: Publish Release
+        if: env.SKIP_RELEASE != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_MODE: ${{ inputs.FORCE_MODE }}
+        run: |
+          if gh release view "$PKG" >/dev/null 2>&1; then
+            if [[ "$FORCE_MODE" != "true" ]]; then exit 0; fi
+            gh release delete "$PKG" --yes --cleanup-tag
+          fi
+          BUILD_DATE=$(date -u +"%Y-%m-%d %H:%M UTC")
+          UPSTREAM_LINK="https://github.com/${UPSTREAM_REPO}/commit/${FULL_COMMIT}"
+
+          if [[ "$BRANCH" == "main" ]]; then
+            CHANGELOG_LINK="https://github.com/${UPSTREAM_REPO}/commits/${FULL_COMMIT}"
+          else
+            CHANGELOG_LINK="https://github.com/${UPSTREAM_REPO}/commits/${BRANCH}"
+          fi
+
+          gh release create "$PKG" "${PKG}.wcp" \
+            --title "$PKG" \
+            --notes "## WOWBox64 ${VER}
+
+          **Commit:** [${UPSTREAM_REPO}@${COMMIT}](${UPSTREAM_LINK})
+          **Branch:** ${BRANCH}
+          **llvm-mingw:** ${LLVM_TAG}
+          **Built:** ${BUILD_DATE}
+
+          ---
+          **Full Changelog:** ${CHANGELOG_LINK}"
