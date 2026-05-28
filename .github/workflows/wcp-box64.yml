@@ -108,7 +108,6 @@ jobs:
       - name: Strip binary
         if: env.SKIP_RELEASE != 'true'
         run: |
-          ${{ env.ANDROID_NDK_HOME }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip build/box64
 
       - name: Create Package (WCP)
         if: env.SKIP_RELEASE != 'true'
