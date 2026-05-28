@@ -105,10 +105,6 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
           make -j"$(nproc)"
 
-      - name: Strip binary
-        if: env.SKIP_RELEASE != 'true'
-        run: |
-
       - name: Create Package (WCP)
         if: env.SKIP_RELEASE != 'true'
         run: |
