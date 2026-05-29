@@ -233,8 +233,8 @@ BOX64_DYNAREC_CALLRET=1
 启用或禁用动态重编译器缓存（DynaCache）。此选项默认为 2（读取已有缓存但不生成新的）。DynaCache 默认将文件写入 home 文件夹，生成新缓存文件时会根据 BOX64_DYNACACHE_LIMIT 控制文件夹大小。
 
  * 0: 禁用 DynaCache。
- * 1: 启用 DynaCache。
- * 2: 使用已有的 DynaCache 文件，但不生成新的。 [默认值]
+ * 1: 启用 DynaCache。 [默认值]
+ * 2: 使用已有的 DynaCache 文件，但不生成新的。
 
 ### BOX64_DYNACACHE_FOLDER
 
@@ -285,7 +285,7 @@ DynaCache 写入磁盘的最小大小（KB）。默认大小为 350KB。
 
 ### BOX64_AVX
 
-向 CPUID 和 cpuinfo 文件暴露 AVX 扩展。在 Arm64 上默认值为 2，因为 DynaRec 已完全实现，其他架构默认为 0。 在 WowBox64 中可用。
+向 CPUID 和 cpuinfo 文件暴露 AVX 扩展。在 Arm64 和龙架构上默认值为 2，因为 DynaRec 已完全实现，其他架构默认为 0。 在 WowBox64 中可用。
 
  * 0: 不暴露 AVX 能力。
  * 1: 向 CPUID 和 cpuinfo 文件暴露 AVX、BMI1、F16C 和 VAES 扩展。
