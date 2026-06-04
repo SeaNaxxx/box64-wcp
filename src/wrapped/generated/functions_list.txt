@@ -6799,6 +6799,10 @@ wrappedpangoft2:
   - pango_fc_font_lock_face
 wrappedpcap:
 wrappedpipewire03:
+- pFpV:
+  - pw_properties_new
+- iFpppV:
+  - pw_properties_setf
 wrappedpixman1:
 wrappedplc4:
 wrappedplds4:
