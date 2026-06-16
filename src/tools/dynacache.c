@@ -91,7 +91,7 @@ done:
     `box64 --dynacache-clean` can be used from command line to purge obsolete DyaCache files
 */
 
-#define FILE_VERSION 5
+#define FILE_VERSION 6
 #define HEADER_SIGN  "DynaCache"
 
 typedef struct DynaCacheHeader_s {
@@ -117,61 +117,102 @@ typedef struct DynaCacheHeader_s {
     char        filename[];
 } DynaCacheHeader_t;
 
-#define DYNAREC_SETTINGS()                                              \
-    DS_GO(BOX64_DYNAREC_ALIGNED_ATOMICS, dynarec_aligned_atomics, 1)    \
-    DS_GO(BOX64_DYNAREC_BIGBLOCK, dynarec_bigblock, 2)                  \
-    DS_GO(BOX64_DYNAREC_CALLRET, dynarec_callret, 2)                    \
-    DS_GO(BOX64_DYNAREC_DF, dynarec_df, 1)                              \
-    DS_GO(BOX64_DYNAREC_DIRTY, dynarec_dirty, 2)                        \
-    DS_GO(BOX64_DYNAREC_DIV0, dynarec_div0, 1)                          \
-    DS_GO(BOX64_DYNAREC_FASTNAN, dynarec_fastnan, 1)                    \
-    DS_GO(BOX64_DYNAREC_FASTROUND, dynarec_fastround, 2)                \
-    DS_GO(BOX64_DYNAREC_NOHOTPAGE, dynarec_nohotpage, 1)                \
-    DS_GO(BOX64_DYNAREC_NATIVEFLAGS, dynarec_nativeflags, 1)            \
-    DS_GO(BOX64_DYNAREC_SAFEFLAGS, dynarec_safeflags, 2)                \
-    DS_GO(BOX64_DYNAREC_STRONGMEM, dynarec_strongmem, 3)                \
-    DS_GO(BOX64_DYNAREC_VOLATILE_METADATA, dynarec_volatile_metadata, 1)\
-    DS_GO(BOX64_DYNAREC_WEAKBARRIER, dynarec_weakbarrier, 2)            \
-    DS_GO(BOX64_DYNAREC_X87DOUBLE, dynarec_x87double, 2)                \
-    DS_GO(BOX64_DYNAREC_NOARCH, dynarec_noarch, 2)                      \
-    DS_GO(BOX64_DYNAREC_SEP, dynarec_sep, 2)                            \
-    DS_GO(BOX64_AES, aes, 1)                                            \
-    DS_GO(BOX64_PCLMULQDQ, pclmulqdq, 1)                                \
-    DS_GO(BOX64_SHAEXT, shaext, 1)                                      \
-    DS_GO(BOX64_SSE42, sse42, 1)                                        \
-    DS_GO(BOX64_AVX, avx, 2)                                            \
-    DS_GO(BOX64_X87_NO80BITS, x87_no80bits, 1)                          \
-    DS_GO(BOX64_RDTSC_1GHZ, rdtsc_1ghz, 1)                              \
-    DS_GO(BOX64_RDTSC_INV, rdtsc_inv, 1)                                \
-    DS_GO(BOX64_SSE_FLUSHTO0, sse_flushto0, 1)                          \
-    DS_GO(BOX64_CPUTYPE, cputype, 1)                                    \
-    DS_GO(BOX64_IGNOREINT3, ignoreint3, 1)                              \
+// Helpers for conditional code emission based on dynacache bit width.
+#define DC_0(...)
+#define DC_1(...)                __VA_ARGS__
+#define DC_2(...)                __VA_ARGS__
+#define DC_3(...)                __VA_ARGS__
+#define DC_CONCAT(A, B)          A##B
+#define DC_IF_WIDTH(WIDTH, CODE) DC_CONCAT(DC_, WIDTH)(CODE)
 
-#define DS_GO(A, B, C) uint64_t B:C;
+// Generate dynarec_settings_t bit-fields from ENVSUPER().
+#define INTEGER(NAME, name, default, min, max, wine, dynacache) DC_IF_WIDTH(dynacache, uint64_t name : dynacache;)
+#define INTEGER64(NAME, name, default, wine, dynacache)         DC_IF_WIDTH(dynacache, uint64_t name : dynacache;)
+#define BOOLEAN(NAME, name, default, wine, dynacache)           DC_IF_WIDTH(dynacache, uint64_t name : dynacache;)
+#define ADDRESS(NAME, name, wine, dynacache)                    DC_IF_WIDTH(dynacache, uint64_t name : dynacache;)
+#define STRING(NAME, name, wine, dynacache)                     DC_IF_WIDTH(dynacache, uint64_t name : dynacache;)
 typedef union dynarec_settings_s {
     struct {
-        DYNAREC_SETTINGS()
+        ENVSUPER()
     };
     uint64_t    x;
 } dynarec_settings_t;
-#undef DS_GO
+#undef INTEGER
+#undef INTEGER64
+#undef BOOLEAN
+#undef ADDRESS
+#undef STRING
+
+static int displayToInteger(const char* name, int value)
+{
+    if (!strcmp(name, "BOX64_DYNAREC_FORWARD")) {
+        switch (value) {
+            case 0: return 0;
+            case 128: return 1;
+            case 256: return 2;
+            case 512: return 3;
+            case 1024: return 4;
+            default: return 1; // default 128
+        }
+    }
+    return value;
+}
+
+static int integerToDisplay(const char* name, int stored)
+{
+    if (!strcmp(name, "BOX64_DYNAREC_FORWARD")) {
+        switch (stored) {
+            case 0: return 0;
+            case 1: return 128;
+            case 2: return 256;
+            case 3: return 512;
+            case 4: return 1024;
+            default: return 128;
+        }
+    }
+    return stored;
+}
+
 uint64_t GetDynSetting(mapping_t* mapping)
 {
     dynarec_settings_t settings = {0};
-    #define DS_GO(A, B, C)  settings.B = (mapping->env && mapping->env->is_##B##_overridden)?mapping->env->B:box64env.B;
-    DYNAREC_SETTINGS()
-    #undef DS_GO
+#define INTEGER(NAME, name, default, min, max, wine, dynacache) DC_IF_WIDTH(dynacache, settings.name = displayToInteger(#NAME, (mapping && mapping->env && mapping->env->is_##name##_overridden) ? mapping->env->name : box64env.name);)
+#define INTEGER64(NAME, name, default, wine, dynacache)         DC_IF_WIDTH(dynacache, settings.name = (mapping && mapping->env && mapping->env->is_##name##_overridden) ? mapping->env->name : box64env.name;)
+#define BOOLEAN(NAME, name, default, wine, dynacache)           DC_IF_WIDTH(dynacache, settings.name = (mapping && mapping->env && mapping->env->is_##name##_overridden) ? mapping->env->name : box64env.name;)
+#define ADDRESS(NAME, name, wine, dynacache)                    DC_IF_WIDTH(dynacache, settings.name = (mapping && mapping->env && mapping->env->is_##name##_overridden) ? mapping->env->name : box64env.name;)
+#define STRING(NAME, name, wine, dynacache)                     DC_IF_WIDTH(dynacache, settings.name = (mapping && mapping->env && mapping->env->is_##name##_overridden) ? mapping->env->name : box64env.name;)
+    ENVSUPER()
+#undef INTEGER
+#undef INTEGER64
+#undef BOOLEAN
+#undef ADDRESS
+#undef STRING
     return settings.x;
 }
-void PrintDynfSettings(int level, uint64_t s)
+
+void PrintDynSettings(int level, uint64_t s)
 {
     dynarec_settings_t settings = {0};
     settings.x = s;
-    #define DS_GO(A, B, C) if(settings.B) printf_log_prefix(0, level, "\t\t" #A "=%d\n", settings.B);
-    DYNAREC_SETTINGS()
-    #undef DS_GO
+#define INTEGER(NAME, name, default, min, max, wine, dynacache) DC_IF_WIDTH(dynacache, if (settings.name != displayToInteger(#NAME, default)) printf_log_prefix(0, level, "\t\t" #NAME "=%d\n", integerToDisplay(#NAME, settings.name));)
+#define INTEGER64(NAME, name, default, wine, dynacache)         DC_IF_WIDTH(dynacache, if (settings.name != default) printf_log_prefix(0, level, "\t\t" #NAME "=%lld\n", settings.name);)
+#define BOOLEAN(NAME, name, default, wine, dynacache)           DC_IF_WIDTH(dynacache, if (settings.name != default) printf_log_prefix(0, level, "\t\t" #NAME "=%d\n", settings.name);)
+#define ADDRESS(NAME, name, wine, dynacache)                    DC_IF_WIDTH(dynacache, if (settings.name != default) printf_log_prefix(0, level, "\t\t" #NAME "=%p\n", (void*)settings.name);)
+#define STRING(NAME, name, wine, dynacache)                     DC_IF_WIDTH(dynacache, if (settings.name != default) printf_log_prefix(0, level, "\t\t" #NAME "=%s\n", (char*)settings.name);)
+    ENVSUPER()
+#undef INTEGER
+#undef INTEGER64
+#undef BOOLEAN
+#undef ADDRESS
+#undef STRING
 }
-#undef DYNAREC_SETTINGS
+
+#undef DC_0
+#undef DC_1
+#undef DC_2
+#undef DC_3
+#undef DC_CONCAT
+#undef DC_IF_WIDTH
 
 char* MmaplistName(const char* filename, uint64_t dynarec_settings, const char* fullname)
 {
@@ -192,7 +233,7 @@ char* GetMmaplistName(mapping_t* mapping)
 const char* NicePrintSize(size_t sz)
 {
     static char buf[256];
-    const char* units[] = {"", "kb", "Mb", "Gb"};
+    const char* units[] = {"", "KiB", "MiB", "GiB"};
     int idx = 0;
     size_t ratio = 0;
     while(idx<sizeof(units)/sizeof(units[0]) && (1<<(ratio+10))<sz) {
@@ -607,12 +648,12 @@ int ReadDynaCache(const char* folder, const char* name, mapping_t* mapping, int 
     char filename[strlen(folder)+strlen(name)+1];
     strcpy(filename, folder);
     strcat(filename, name);
-    if(verbose) printf_log(LOG_NONE, "File %s:\t", name);
+    if (!FileExist(filename, IS_FILE)) return DCERR_NEXIST;
+    if (verbose) printf_log(LOG_NONE, "File %s:\n\t", name);
     FILE *f = fopen(filename, "rb");
     if(!f) {
-        int exists = FileExist(filename, IS_FILE);
-        if(verbose) printf_log_prefix(0, LOG_NONE, "%s\n", exists?"Cannot open file":"Invalid file");
-        return exists?DCERR_FERROR:DCERR_NEXIST;
+        if (verbose) printf_log_prefix(0, LOG_NONE, "Cannot open file\n");
+        return DCERR_FERROR;
     }
     struct stat st = {0};
     int fd = fileno(f);
@@ -678,6 +719,7 @@ int ReadDynaCache(const char* folder, const char* name, mapping_t* mapping, int 
     }
     all_header = box_malloc(header.cache_header_size);
     if(!all_header) {
+        if (verbose) printf_log_prefix(0, LOG_NONE, "Cannot allocate memory for header\n");
         fclose(f);
         return DCERR_FERROR;
     }
@@ -810,7 +852,7 @@ int ReadDynaCache(const char* folder, const char* name, mapping_t* mapping, int 
             // file is valid, gives informations:
             printf_log_prefix(0, LOG_NONE, "%s (%s)\n", map_filename, NicePrintSize(filesize));
             printf_log_prefix(0, LOG_NONE, "\tDynarec Settings:\n");
-            PrintDynfSettings(LOG_NONE, file_header->dynarec_settings);
+            PrintDynSettings(LOG_NONE, file_header->dynarec_settings);
             size_t total_blocks = 0, total_free = 0, total_compressed = 0, total_uncompressed = 0;
             size_t total_code = file_header->codesize;
             for(int i=0; i<file_header->nblocks; ++i) {
@@ -821,15 +863,22 @@ int ReadDynaCache(const char* folder, const char* name, mapping_t* mapping, int 
                 else
                     total_uncompressed += blocks[i].block.size;
             }
-            printf_log_prefix(0, LOG_NONE, "\tHas %d blocks for a total of %s", file_header->nblocks, NicePrintSize(total_blocks));
-            printf_log_prefix(0, LOG_NONE, " with %s still free", NicePrintSize(total_free));
-            printf_log_prefix(0, LOG_NONE, " and %s non-canceled blocks (mapped at %p-%p, with %zu lock and %zu unaligned addresses)", NicePrintSize(total_code), (void*)file_header->map_addr, (void*)file_header->map_addr+file_header->map_len, file_header->nLockAddresses, file_header->nUnalignedAddresses);
-            if(total_compressed) {
-                printf_log_prefix(0, LOG_NONE, " with %s compressed blocks", NicePrintSize(total_compressed));
-                if(total_uncompressed)
-                    printf_log_prefix(0, LOG_NONE, " and %s uncompressed block", NicePrintSize(total_uncompressed));
+            char buf[1024];
+            int n = 0;
+            n += snprintf(buf+n, sizeof(buf)-n, "\tHas %d blocks for a total of %s", file_header->nblocks, NicePrintSize(total_blocks));
+            n += snprintf(buf+n, sizeof(buf)-n, ", with %s still free", NicePrintSize(total_free));
+            n += snprintf(buf+n, sizeof(buf)-n, " and %s non-canceled blocks\n", NicePrintSize(total_code));
+            n += snprintf(buf+n, sizeof(buf)-n, "\tMapped at %p-%p, with %zu lock and %zu unaligned addresses",
+                (void*)file_header->map_addr, (void*)file_header->map_addr+file_header->map_len,
+                file_header->nLockAddresses, file_header->nUnalignedAddresses);
+            if(total_compressed && n>0 && n<(int)sizeof(buf)) {
+                n += snprintf(buf+n, sizeof(buf)-n, "\n\tCompression: %s compressed", NicePrintSize(total_compressed));
+                if(total_uncompressed && n>0 && n<(int)sizeof(buf))
+                    n += snprintf(buf+n, sizeof(buf)-n, ", %s uncompressed", NicePrintSize(total_uncompressed));
             }
-            printf_log_prefix(0, LOG_NONE, "\n");
+            if(n>0 && n<(int)sizeof(buf))
+                snprintf(buf+n, sizeof(buf)-n, "\n");
+            printf_log_prefix(0, LOG_NONE, "%s", buf);
         }
     } else {
         // actually reading!
@@ -863,6 +912,7 @@ int ReadDynaCache(const char* folder, const char* name, mapping_t* mapping, int 
             addLockAddress(lockAddresses[i]+delta_map);
         for(size_t i=0; i<file_header->nUnalignedAddresses; ++i)
             add_unaligned_address(unalignedAddresses[i]+delta_map);
+        if (verbose) printf_log_prefix(0, LOG_NONE, "Cache loaded successfully\n");
         dynarec_log(LOG_INFO, "Loaded DynaCache for %s, with %d blocks\n", mapping->fullname, file_header->nblocks);
         // try to update mtime for used cache file, so that it is less likely to be pruned
         utime(filename, NULL);
