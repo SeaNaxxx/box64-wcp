@@ -3081,9 +3081,7 @@ uintptr_t dynarec64_00(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
                     SETFLAGS(X_OF | X_CF, SF_SUBSET, NAT_FLAGS_FUSION);
                     ANDI(x3, xRCX, rex.w ? 63 : 31);
                     GETED(0);
-                    UFLAG_IF {
-                        if (!rex.w && !rex.is32bits && MODREG) { ZEROUP(ed); }
-                    }
+                    if (!rex.w && !rex.is32bits && MODREG) { ZEROUP(ed); }
                     CBZ_NEXT(x3);
                     emit_rcl32(dyn, ninst, rex, ed, x3, x5, x4, x6);
                     WBACK;
@@ -3102,9 +3100,7 @@ uintptr_t dynarec64_00(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
                         ANDI(x3, xRCX, 0x1f);
                     }
                     GETED(0);
-                    UFLAG_IF {
-                        if (!rex.w && !rex.is32bits && MODREG) { ZEROUP(ed); }
-                    }
+                    if (!rex.w && !rex.is32bits && MODREG) { ZEROUP(ed); }
                     CBZ_NEXT(x3);
                     emit_rcr32(dyn, ninst, rex, ed, x3, x5, x4, x6);
                     WBACK;
@@ -3182,8 +3178,52 @@ uintptr_t dynarec64_00(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
                     emit_sar32(dyn, ninst, rex, ed, x3, x5, x4);
                     WBACK;
                     break;
-                default:
-                    DEFAULT;
+            }
+            break;
+        case 0xD4:
+            if (rex.is32bits) {
+                INST_NAME("AAM Ib");
+                SETFLAGS(X_ALL, SF_SET_DF, NAT_FLAGS_NOFUSION);
+                BSTRPICK_D(x1, xRAX, 7, 0);
+                u8 = F8;
+                MOV32w(x2, u8);
+                CALL(const_aam16, x1, x1, x2);
+                BSTRINS_D(xRAX, x1, 15, 0);
+            } else {
+                INST_NAME("Illegal D4");
+                if (BOX64DRENV(dynarec_safeflags) > 1) {
+                    READFLAGS(X_PEND);
+                } else {
+                    SETFLAGS(X_ALL, SF_SET_NODF, NAT_FLAGS_NOFUSION);
+                }
+                GETIP(ip, x7);
+                BARRIER(BARRIER_FLOAT);
+                UDF();
+                *need_epilog = 1;
+                *ok = 0;
+            }
+            break;
+        case 0xD5:
+            if (rex.is32bits) {
+                INST_NAME("AAD Ib");
+                SETFLAGS(X_ALL, SF_SET_DF, NAT_FLAGS_NOFUSION);
+                BSTRPICK_D(x1, xRAX, 15, 0);
+                u8 = F8;
+                MOV32w(x2, u8);
+                CALL(const_aad16, x1, x1, x2);
+                BSTRINS_D(xRAX, x1, 15, 0);
+            } else {
+                INST_NAME("Illegal D5");
+                if (BOX64DRENV(dynarec_safeflags) > 1) {
+                    READFLAGS(X_PEND);
+                } else {
+                    SETFLAGS(X_ALL, SF_SET_NODF, NAT_FLAGS_NOFUSION);
+                }
+                GETIP(ip, x7);
+                BARRIER(BARRIER_FLOAT);
+                UDF();
+                *need_epilog = 1;
+                *ok = 0;
             }
             break;
         case 0xD7:
