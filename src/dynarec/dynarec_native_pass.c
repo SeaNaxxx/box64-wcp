@@ -237,7 +237,7 @@ uintptr_t native_pass(dynarec_native_t* dyn, uintptr_t addr, int alternate, int 
             DMB_ISHST();
         #endif
         if (BOX64DRENV(dynarec_dump) && (!BOX64ENV(dynarec_dump_range_end) || (ip >= BOX64ENV(dynarec_dump_range_start) && ip < BOX64ENV(dynarec_dump_range_end)))) {
-            dyn->need_dump = BOX64DRENV(dynarec_dump);
+            dyn->need_dump = BOX64DRENV(dynarec_dump) == 3 && STEP != 3 ? 0 : BOX64DRENV(dynarec_dump);
         }
         if(BOX64ENV(dynarec_test) && (!BOX64ENV(dynarec_test_end) || (ip>=BOX64ENV(dynarec_test_start) && ip<BOX64ENV(dynarec_test_end)))) {
             int need_dump = dyn->need_dump;
@@ -245,6 +245,9 @@ uintptr_t native_pass(dynarec_native_t* dyn, uintptr_t addr, int alternate, int 
             MESSAGE(LOG_DUMP, "TEST STEP ----\n");
             extcache_native_t save;
             fpu_save_and_unwind(dyn, ninst, &save);
+            #ifdef LA64
+            UP32_READALL();
+            #endif
             fpu_reflectcache(dyn, ninst, x1, x2, x3);
             GO_TRACE(x64test_step, 1, x5);
             fpu_unreflectcache(dyn, ninst, x1, x2, x3);
@@ -258,6 +261,9 @@ uintptr_t native_pass(dynarec_native_t* dyn, uintptr_t addr, int alternate, int 
                 MESSAGE(LOG_DUMP, "TRACE ----\n");
                 #if defined (SPILL_NF_REGISTERS)
                 if (BOX64ENV(dynarec_nativeflags)) SPILL_NF_REGISTERS;
+                #endif
+                #ifdef LA64
+                UP32_READALL();
                 #endif
                 fpu_reflectcache(dyn, ninst, x1, x2, x3);
                 GO_TRACE(PrintTrace, 1, x5);
