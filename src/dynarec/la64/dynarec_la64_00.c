@@ -761,7 +761,7 @@ uintptr_t dynarec64_00(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
                 ANDI(x4, gd, 3);
                 SLTU(x5, x6, x4);
                 BSTRINS_D(xFlags, x5, F_ZF, F_ZF);
-                SPILL_EFLAGS();
+                if (cpuext.lbt) X64_SET_EFLAGS(xFlags, X_ZF);
                 BEQZ_MARK(x5);
                 BSTRINS_D(ed, gd, 1, 0);
                 EWBACK;
@@ -2881,8 +2881,6 @@ uintptr_t dynarec64_00(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
                     if (isRetX87Wrapper(*(wrapper_t*)(addr)))
                         // return value will be on the stack, so the stack depth needs to be updated
                         x87_purgecache(dyn, ninst, 0, x3, x1, x4);
-                    if (tmp < 0 || (tmp & 15) > 1)
-                        tmp = 0; // TODO: removed when FP is in place
                     if ((BOX64ENV(log) < 2 && !BOX64ENV(rolling_log)) && tmp) {
                         call_n(dyn, ninst, (void*)(addr + 8), tmp);
                         SMWRITE2();
@@ -3615,8 +3613,6 @@ uintptr_t dynarec64_00(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
                         tmp = isSimpleWrapper(*(wrapper_t*)(dyn->insts[ninst].natcall + 2));
                     } else
                         tmp = 0;
-                    if (tmp < 0 || (tmp & 15) > 1)
-                        tmp = 0; // TODO: removed when FP is in place
                     if (dyn->insts[ninst].natcall && isRetX87Wrapper(*(wrapper_t*)(dyn->insts[ninst].natcall + 2)))
                         // return value will be on the stack, so the stack depth needs to be updated
                         x87_purgecache(dyn, ninst, 0, x3, x1, x4);
