@@ -250,6 +250,7 @@ uintptr_t dynarec64_AVX_66_0F(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip,
             INST_NAME("VSQRTPD Gx, Ex");
             nextop = F8;
             GETGX();
+            GETGY();
             GETEX(x2, 0, 8);
             d0 = fpu_get_scratch(dyn);
             if (!BOX64ENV(dynarec_fastnan)) {
@@ -2869,7 +2870,7 @@ uintptr_t dynarec64_AVX_66_0F(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip,
         case 0xFB:
             INST_NAME("VPSUBQ Gx, Vx, Ex");
             nextop = F8;
-            GETEX(x2, 0, 8);
+            GETEX(x2, 0, vex.l ? 24 : 8);
             GETGX();
             GETGY();
             GETVX();
