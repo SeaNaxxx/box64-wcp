@@ -244,7 +244,7 @@ uintptr_t dynarec64_660F(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int 
             } else {
                 INST_NAME("UCOMISD Gx, Ex");
             }
-            SETFLAGS(X_ALL, SF_SET, NAT_FLAGS_NOFUSION);
+            SETFLAGS(X_ALL, SF_SET_NODF, NAT_FLAGS_NOFUSION);
             SET_DFNONE();
             nextop = F8;
             GETGXSD(d0);
@@ -499,8 +499,8 @@ uintptr_t dynarec64_660F(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int 
                 FEQD(x4, d1, d1);
                 AND(x3, x3, x4);
                 BEQ(x3, xZR, 12);
-                FLTD(x3, d1, d0);
-                BEQ(x3, xZR, 8); // continue
+                FLTD(x3, d0, d1);
+                BNE(x3, xZR, 8); // continue
                 FSD(d1, gback, gdoffset + 8 * i);
             }
             break;
@@ -545,7 +545,7 @@ uintptr_t dynarec64_660F(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int 
                 FEQD(x4, d1, d1);
                 AND(x3, x3, x4);
                 BEQ(x3, xZR, 12);
-                FLTD(x3, d0, d1);
+                FLED(x3, d0, d1);
                 BEQ(x3, xZR, 8); // continue
                 FSD(d1, gback, gdoffset + 8 * i);
             }
@@ -1250,9 +1250,9 @@ uintptr_t dynarec64_660F(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int 
             INST_NAME("SHLD Ew, Gw, CL");
             if (BOX64DRENV(dynarec_safeflags) > 1) {
                 READFLAGS(X_ALL);
-                SETFLAGS(X_ALL, SF_SET, NAT_FLAGS_FUSION);
+                SETFLAGS(X_ALL, SF_SET_NODF, NAT_FLAGS_NOFUSION);
             } else
-                SETFLAGS(X_ALL, SF_SET_PENDING, NAT_FLAGS_FUSION);
+                SETFLAGS(X_ALL, SF_SET_PENDING, NAT_FLAGS_NOFUSION);
             GETGW(x2);
             GETEW(x1, 0);
             ANDI(x4, xRCX, 0x1f);
@@ -1323,9 +1323,9 @@ uintptr_t dynarec64_660F(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int 
             INST_NAME("SHRD Ew, Gw, CL");
             if (BOX64DRENV(dynarec_safeflags) > 1) {
                 READFLAGS(X_ALL);
-                SETFLAGS(X_ALL, SF_SET, NAT_FLAGS_FUSION);
+                SETFLAGS(X_ALL, SF_SET_NODF, NAT_FLAGS_NOFUSION);
             } else
-                SETFLAGS(X_ALL, SF_SET_PENDING, NAT_FLAGS_FUSION);
+                SETFLAGS(X_ALL, SF_SET_PENDING, NAT_FLAGS_NOFUSION);
             GETGW(x2);
             GETEW(x1, 0);
             ANDI(x4, xRCX, 0x1f);
@@ -1596,7 +1596,7 @@ uintptr_t dynarec64_660F(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int 
         case 0xBC:
             INST_NAME("BSF Gw, Ew");
             if (BOX64DRENV(dynarec_safeflags)) {
-                SETFLAGS(X_ALL, SF_SET, NAT_FLAGS_NOFUSION);
+                SETFLAGS(X_ALL, SF_SET_NODF, NAT_FLAGS_NOFUSION);
                 IFX (X_ALL) CLEAR_FLAGS();
             } else
                 SETFLAGS(X_ZF, SF_SUBSET, NAT_FLAGS_NOFUSION);
@@ -1626,7 +1626,7 @@ uintptr_t dynarec64_660F(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int 
         case 0xBD:
             INST_NAME("BSR Gw, Ew");
             if (BOX64DRENV(dynarec_safeflags)) {
-                SETFLAGS(X_ALL, SF_SET, NAT_FLAGS_NOFUSION);
+                SETFLAGS(X_ALL, SF_SET_NODF, NAT_FLAGS_NOFUSION);
                 IFX (X_ALL) CLEAR_FLAGS();
             } else
                 SETFLAGS(X_ZF, SF_SUBSET, NAT_FLAGS_NOFUSION);
