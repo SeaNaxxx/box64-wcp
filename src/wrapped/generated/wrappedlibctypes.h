@@ -140,7 +140,9 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
 	GO(_ITM_deregisterTMCloneTable, vFp_t) \
 	GO(_ZGTtdlPv, vFp_t) \
 	GO(__cxa_finalize, vFp_t) \
+	GO(__getpagesize, iFv_t) \
 	GO(fork, iFv_t) \
+	GO(getpagesize, iFv_t) \
 	GO(sched_getcpu, iFv_t) \
 	GO(vfork, iFv_t) \
 	GO(iopl, iFi_t) \
@@ -265,7 +267,10 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
 	GO(__printf_chk, iFipV_t) \
 	GO(dprintf, iFipV_t) \
 	GO(vdprintf, iFipA_t) \
+	GO(__madvise, iFpLi_t) \
+	GO(madvise, iFpLi_t) \
 	GO(mprotect, iFpLi_t) \
+	GO(posix_madvise, iFpLi_t) \
 	GO(init_module, iFpLp_t) \
 	GO(ftw, iFppi_t) \
 	GO(ftw64, iFppi_t) \

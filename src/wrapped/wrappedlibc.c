@@ -3617,6 +3617,22 @@ EXPORT void* my_mmap64(x64emu_t* emu, void *addr, size_t length, int prot, int f
 {
     (void)emu;
     if(BOX64ENV(dynarec_log)>=LOG_DEBUG) {printf_log(LOG_NONE, "mmap64(%p, 0x%zx, 0x%x, 0x%x, %d, %zd) ", addr, length, prot, flags, fd, offset);}
+
+    // 1. non4k pagesize
+    // 2. fixed and anonymous mapping
+    // 3. PROT_NONE
+    // 4. small and unaligned to host pagesize
+    // 5. start and end both belongs to existing map
+    // --> the application is trying to place some 4k PROT_NONE canary page in between!
+    //     that's not gonna work on larger pagesize host no matter how, so just return success and do nothing.
+    uintptr_t start = (uintptr_t)addr;
+    uintptr_t end = start + length;
+    if(box64_pagesize > X86_PAGE_SIZE && addr && length && end > start && !prot &&
+       (flags & MAP_FIXED) && (flags & MAP_ANONYMOUS) &&
+       ((start & (box64_pagesize - 1)) || (end & (box64_pagesize - 1))) &&
+       getProtection(start) && getProtection(end - 1)) {
+        return addr;
+    }
     void* ret = box_mmap(addr, length, prot, flags, fd, offset);
     int e = errno;
     if(emu && box64_is32bits && ret!=MAP_FAILED && ((ret>(void*)0xc0000000) || (ret+length>(void*)0xc0000000))) {
@@ -3788,11 +3804,90 @@ EXPORT int my_mprotect(x64emu_t* emu, void *addr, unsigned long len, int prot)
     if(emu && (BOX64ENV(log)>=LOG_DEBUG || BOX64ENV(dynarec_log)>=LOG_DEBUG)) {printf_log(LOG_NONE, "mprotect(%p, 0x%lx, 0x%x)\n", addr, len, prot);}
     if(prot&PROT_WRITE)
         prot|=PROT_READ;    // PROT_READ is implicit with PROT_WRITE on x86_64
-    int ret = mprotect(addr, len, prot);
-    if(!ret && len) {
-        updateProtection((uintptr_t)addr, len, prot);
+    uintptr_t start = (uintptr_t)addr;
+    if(box64_pagesize == X86_PAGE_SIZE) {
+        int ret = mprotect(addr, len, prot);
+        if(!ret && len) updateProtection(start, len, prot);
+        return ret;
     }
+    if(start & (X86_PAGE_SIZE - 1)) {
+        errno = EINVAL;
+        return -1;
+    }
+    if(!len) return 0;
+    uintptr_t end = (start + len + X86_PAGE_SIZE - 1) & ~(X86_PAGE_SIZE - 1);
+    uintptr_t host_start = start & ~(box64_pagesize - 1);
+    uintptr_t host_end = (end + box64_pagesize - 1) & ~(box64_pagesize - 1);
+
+    if(host_end - host_start == box64_pagesize && (start != host_start || end != host_end)) {
+        prot |= getProtection(host_start) & ~PROT_CUSTOM;
+        int ret = mprotect((void*)host_start, box64_pagesize, prot);
+        if(!ret) updateProtection(host_start, box64_pagesize, prot);
+        return ret;
+    }
+
+    if(start != host_start) {
+        int host_prot = prot | (getProtection(host_start) & ~PROT_CUSTOM);
+        int ret = mprotect((void*)host_start, box64_pagesize, host_prot);
+        if(ret) return -1;
+        updateProtection(host_start, box64_pagesize, host_prot);
+        host_start += box64_pagesize;
+    }
+    if(end != host_end) {
+        host_end -= box64_pagesize;
+        int host_prot = prot | (getProtection(host_end) & ~PROT_CUSTOM);
+        int ret = mprotect((void*)host_end, box64_pagesize, host_prot);
+        if(ret) return -1;
+        updateProtection(host_end, box64_pagesize, host_prot);
+    }
+    if(host_start == host_end) return 0;
+    int ret = mprotect((void*)host_start, host_end - host_start, prot);
+    if(!ret) updateProtection(host_start, host_end - host_start, prot);
     return ret;
+}
+
+EXPORT int my_madvise(x64emu_t* emu, void* addr, size_t length, int advice)
+{
+    (void)emu;
+    uintptr_t start = (uintptr_t)addr;
+    if(start & (X86_PAGE_SIZE - 1)) {
+        errno = EINVAL;
+        return -1;
+    }
+    if(!length) return 0;
+    uintptr_t end = (start + length + X86_PAGE_SIZE - 1) & ~(X86_PAGE_SIZE - 1);
+
+    if(advice != MADV_DONTNEED) {
+        uintptr_t host_start = start & ~(box64_pagesize - 1);
+        uintptr_t host_end = (end + box64_pagesize - 1) & ~(box64_pagesize - 1);
+        return madvise((void*)host_start, host_end - host_start, advice);
+    }
+
+    if(box64_pagesize == X86_PAGE_SIZE) return madvise(addr, end - start, advice);
+
+    if(!(start & (box64_pagesize - 1)) && !(end & (box64_pagesize - 1)))
+        return madvise(addr, end - start, advice);
+
+    if(!memExist(start) || !memExist(end - 1)) {
+        errno = ENOMEM;
+        return -1;
+    }
+
+    if(IsAddrElfOrFileMapped(start) || IsAddrElfOrFileMapped(end - 1)) return 0;
+
+    if(!(getProtection(start) & PROT_WRITE) || !(getProtection(end - 1) & PROT_WRITE)) return 0;
+
+    memset((void*)start, 0, end - start);
+    return 0;
+}
+
+EXPORT int my___madvise(x64emu_t* emu, void* addr, size_t length, int advice) __attribute__((alias("my_madvise")));
+
+EXPORT int my_posix_madvise(x64emu_t* emu, void* addr, size_t length, int advice)
+{
+    (void)emu;
+    if(advice == POSIX_MADV_DONTNEED) return 0;
+    return posix_madvise(addr, length, advice);
 }
 
 typedef struct mallinfo (*mallinfo_fnc)(void);
@@ -4867,7 +4962,16 @@ __attribute__((weak)) int dn_skipname(const unsigned char* ptr, const unsigned c
 #ifndef _SC_NPROCESSORS_CONF
 #define _SC_NPROCESSORS_CONF    83
 #endif
+EXPORT int my_getpagesize(x64emu_t* emu) {
+    (void)emu;
+    return X86_PAGE_SIZE;
+}
+EXPORT int my___getpagesize(x64emu_t* emu) __attribute__((alias("my_getpagesize")));
+
 EXPORT long my_sysconf(x64emu_t* emu, int what) {
+    if(what==_SC_PAGESIZE) {
+        return X86_PAGE_SIZE;
+    }
     if(what==_SC_NPROCESSORS_ONLN) {
         return box64_sysinfo.box64_ncpu;
     }
