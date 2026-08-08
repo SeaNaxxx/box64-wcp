@@ -140,7 +140,6 @@
 #() fWp
 #() vFEi
 #() vFEp
-#() vFEb
 #() vFcc
 #() vFww
 #() vFii
@@ -190,7 +189,6 @@
 #() vFpL
 #() vFpp
 #() vFpS
-#() vFpA
 #() vFSi
 #() vFSl
 #() vFSp
@@ -246,7 +244,6 @@
 #() iFpO
 #() iFpS
 #() iFpH
-#() iFpA
 #() iFSi
 #() iFSp
 #() iFHp
@@ -554,7 +551,6 @@
 #() vFppL
 #() vFppp
 #() vFppV
-#() vFppA
 #() vFpHi
 #() vFSpi
 #() vFSpL
@@ -701,7 +697,6 @@
 #() iFSpi
 #() iFSpL
 #() iFSpp
-#() iFSpA
 #() iFHHp
 #() iFbpp
 #() IFiIi
@@ -1163,7 +1158,6 @@
 #() vFpppl
 #() vFpppL
 #() vFpppp
-#() vFpppV
 #() vFSpii
 #() vFSppi
 #() vFHHpi
@@ -1731,6 +1725,7 @@
 #() vFEpppi
 #() vFEpppu
 #() vFEpppp
+#() vFEpppV
 #() vFiiiii
 #() vFiiiiu
 #() vFiiipi
@@ -1830,7 +1825,6 @@
 #() vFpiiup
 #() vFpiiff
 #() vFpiipp
-#() vFpiipV
 #() vFpiuuu
 #() vFpilpp
 #() vFpipii
@@ -1865,6 +1859,7 @@
 #() vFplplp
 #() vFpLiii
 #() vFpLiiL
+#() vFpLipp
 #() vFpLLLL
 #() vFpLLLp
 #() vFpLLpp
@@ -2282,6 +2277,7 @@
 #() pFEpppp
 #() pFEpppV
 #() pFEpppA
+#() pFESppp
 #() pFiiupi
 #() pFiiupL
 #() pFipipL
@@ -2394,6 +2390,7 @@
 #() iWppppp
 #() vFEiiipp
 #() vFEpiwpp
+#() vFEpiipV
 #() vFEpiLpp
 #() vFEpippp
 #() vFEpuipV
@@ -2724,7 +2721,6 @@
 #() iFppfipp
 #() iFppdidd
 #() iFpplupp
-#() iFpplppi
 #() iFppLiWL
 #() iFppLipp
 #() iFppLupp
@@ -3116,6 +3112,7 @@
 #() iFEppippp
 #() iFEppupup
 #() iFEppuppp
+#() iFEpplppi
 #() iFEppLpIu
 #() iFEpppLpp
 #() iFEpppppL
@@ -3846,7 +3843,6 @@
 #() iFEpuppupppp
 #() iFEpupppLppL
 #() iFEppiippppp
-#() iFEppLuppupp
 #() iFEppppLpppp
 #() iFEppppppipp
 #() iFEpppppppip
@@ -3946,6 +3942,7 @@
 #() iFEppiipppppp
 #() iFEppLpLpLLpp
 #() iFEpppupppppp
+#() iFEpppLuppupp
 #() iFEpppppppppp
 #() iFuiiiiuuiiip
 #() iFuppipipippi
@@ -4431,6 +4428,9 @@ wrappedcrypto3:
   - PEM_read_bio_X509_CERT_PAIR
   - PEM_read_bio_X509_CRL
   - PEM_read_bio_X509_REQ
+- pFSppp:
+  - PEM_read_X509
+  - PEM_read_X509_AUX
 - iFpiipp:
   - ENGINE_ctrl
 - iFpLppp:
@@ -5974,9 +5974,6 @@ wrappedlibgpgme:
 - uFppp:
   - gpgme_data_new_from_cbs
 wrappedlibharfbuzz:
-- vFp:
-  - hb_draw_funcs_destroy
-  - hb_font_funcs_destroy
 - pFp:
   - hb_unicode_funcs_reference
 - pFpp:
@@ -6676,7 +6673,7 @@ wrappedlibx11xcb:
 wrappedlibxau:
 wrappedlibxaw:
 wrappedlibxcb:
-- vFb:
+- vFp:
   - xcb_disconnect
 - pFip:
   - xcb_connect_to_fd
@@ -6826,8 +6823,9 @@ wrappedopenal:
   - alRequestFoldbackStart
 wrappedopencl:
 - iFppp:
-  - clSetEventCallback
   - clSetMemObjectDestructorCallback
+- iFpipp:
+  - clSetEventCallback
 - pFpuppp:
   - clCreateContextFromType
 - iFpupppp:
@@ -6836,10 +6834,10 @@ wrappedopencl:
   - clCreateContext
 - iFpuppupppp:
   - clCompileProgram
-- iFppLuppupp:
-  - clEnqueueNativeKernel
 - pFpuppupppp:
   - clLinkProgram
+- iFpppLuppupp:
+  - clEnqueueNativeKernel
 wrappedp11kit:
 - vFppp:
   - p11_kit_pin_unregister_callback

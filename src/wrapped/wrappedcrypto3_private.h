@@ -1537,7 +1537,7 @@ GO(ENGINE_cleanup, vFv)
 //GO(engine_cleanup_add_last, 
 GO(ENGINE_cmd_is_executable, iFpi)
 GOM(ENGINE_ctrl, iFEpiipp)
-GOM(ENGINE_ctrl_cmd, iFpplppi)
+GOM(ENGINE_ctrl_cmd, iFEpplppi)
 GO(ENGINE_ctrl_cmd_string, iFpppi)
 GO(ENGINE_finish, iFp)
 GO(ENGINE_free, iFp)
@@ -2911,8 +2911,8 @@ GOM(PEM_read_PUBKEY, pFEpppp)
 //GO(PEM_read_RSAPrivateKey, 
 //GO(PEM_read_RSA_PUBKEY, 
 //GO(PEM_read_RSAPublicKey, 
-GO(PEM_read_X509, pFpppp)
-GO(PEM_read_X509_AUX, pFpppp)
+GOM(PEM_read_X509, pFESppp)
+GOM(PEM_read_X509_AUX, pFESppp)
 //GO(PEM_read_X509_CERT_PAIR, 
 //GO(PEM_read_X509_CRL, 
 //GO(PEM_read_X509_REQ, 
