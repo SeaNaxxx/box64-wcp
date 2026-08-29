@@ -1835,6 +1835,22 @@ uintptr_t dynarec64_00(dynarec_arm_t* dyn, uintptr_t addr, uintptr_t ip, int nin
             break;
         case 0x9B:
             INST_NAME("FWAIT");
+            if(BOX64ENV(dynarec_div0)) {
+                LDRH_U12(x1, xEmu, offsetof(x64emu_t, sw));
+                LDRH_U12(x2, xEmu, offsetof(x64emu_t, cw));
+                MVNw_REG(x2, x2);     // ~CW
+                ANDw_REG(x1, x1, x2); // SW & ~CW
+                MOV32w(x3, 0x3F);     // 6 exception flag bits
+                ANDw_REG(x1, x1, x3); // & 0x3F
+                CBZw_MARK3(x1);       // no pending unmasked exception
+                GETIP_(ip);
+                STORE_XEMU_CALL(xRIP);
+                CALL_S(const_native_div0, -1);
+                CLEARIP();
+                LOAD_XEMU_CALL(xRIP);
+                jump_to_epilog(dyn, 0, xRIP, ninst);
+                MARK3;
+            }
             break;
         case 0x9C:
             INST_NAME("PUSHF");
@@ -3012,20 +3028,11 @@ uintptr_t dynarec64_00(dynarec_arm_t* dyn, uintptr_t addr, uintptr_t ip, int nin
             } else {
                 INST_NAME("INT 3");
                 if(!BOX64ENV(ignoreint3)) {
-                    // check if TRAP signal is handled
-                    TABLE64C(x1, const_context);
-                    MOV32w(x2, offsetof(box64context_t, signals[X64_SIGTRAP]));
-                    LDRx_REG(x3, x1, x2);
-                    //LDRx_U12(x3, x1, offsetof(box64context_t, signals[X64_SIGTRAP]));
-                    CMPSx_U12(x3, 0);
-                    // commit df before branch, CALL_S in int3 path has FORCE_DFNONE
                     CHECK_DFNONE(0);
-                    B_MARK(cEQ);
                     GETIP(addr);  // update RIP
                     STORE_XEMU_CALL(xRIP);
                     CALL_S(const_native_int3, -1);
                     LOAD_XEMU_CALL(xRIP);
-                    MARK;
                     jump_to_epilog(dyn, addr, 0, ninst);
                     *need_epilog = 0;
                     *ok = 0;
