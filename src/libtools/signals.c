@@ -422,6 +422,15 @@ int my_sigactionhandler_oldcode_64(x64emu_t* emu, int32_t sig, int simple, sigin
     // get FloatPoint status
     sigcontext->uc_mcontext.fpregs = xstate;//(struct x64_libc_fpstate*)&sigcontext->xstate;
     fpu_xsave_mask(emu, xstate, 0, 0b111);
+    // x86_64 kernel resets the fpu state to its init value before running the signal handler (fpu__clear_user_states),
+    // the interrupted state is kept in the frame and will be restored by the sigreturn.
+    // Refer to https://github.com/torvalds/linux/blob/v7.2/arch/x86/kernel/signal.c#L310
+    reset_fpu(emu);
+    for (int i = 0; i < 16; ++i) {
+        emu->xmm[i].u128 = 0;
+        emu->ymm[i].u128 = 0;
+    }
+    emu->mxcsr.x32 = 0x1f80; // x86 default MXCSR
     memcpy(&sigcontext->xstate, xstate, sizeof(sigcontext->xstate));
     ((struct x64_fpstate*)xstate)->res[12] = 0x46505853;   // magic number to signal an XSTATE type of fpregs
     ((struct x64_fpstate*)xstate)->res[13] = 0; // offset to xstate after this?
@@ -646,6 +655,8 @@ int my_sigactionhandler_oldcode_64(x64emu_t* emu, int32_t sig, int simple, sigin
         }
         printf_log(LOG_INFO, "Warning, context has been changed in Sigactionhanlder%s\n", (sigcontext->uc_mcontext.gregs[X64_RIP]!=sigcontext_copy.uc_mcontext.gregs[X64_RIP])?" (EIP changed)":"");
     }
+    // restore fpu state from the frame, mimicking the sigreturn behavior
+    fpu_xrstor_mask(emu, xstate, 0, 0b111);
     // restore regs...
     #define GO(R)   R_##R=sigcontext->uc_mcontext.gregs[X64_##R]
     GO(RAX);
@@ -1436,7 +1447,7 @@ EXPORT sighandler_t my_signal(x64emu_t* emu, int signum, sighandler_t handler)
     my_context->is_sigaction[signum] = 0;
     my_context->restorer[signum] = 0;
     my_context->onstack[signum] = 0;
-    my_context->sigflags[signum] = 0;
+    my_context->sigflags[signum] = SA_RESTART;
     memset(&my_context->sigmask[signum], 0, sizeof(sigset_t));
 
     if(signum==X64_SIGSEGV || signum==X64_SIGBUS || signum==X64_SIGILL || signum==X64_SIGABRT)
@@ -1445,7 +1456,7 @@ EXPORT sighandler_t my_signal(x64emu_t* emu, int signum, sighandler_t handler)
     if(handler!=NULL && handler!=(sighandler_t)1) {
         struct sigaction newact = {0};
         struct sigaction oldact = {0};
-        newact.sa_flags = 0x04;
+        newact.sa_flags = SA_SIGINFO | SA_RESTART;
         newact.sa_sigaction = MY_SIGHANDLER;
         if(sigaction(signal_from_x64(signum), &newact, &oldact)<0)
             return SIG_ERR;
