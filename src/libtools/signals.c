@@ -346,7 +346,7 @@ void leave_critical_section()
     emu->deferred_signal_processing = 0;
 }
 
-int my_sigactionhandler_oldcode_64(x64emu_t* emu, int32_t sig, int simple, siginfo_t* info, void * ucntx, int* old_code, void* cur_db)
+int my_sigactionhandler_oldcode_64(x64emu_t* emu, int32_t sig, int simple, siginfo_t* info, void * ucntx, int* old_code, void* cur_db, uintptr_t x64pc)
 {
     int Locks = unlockMutex();
     int log_minimum = (BOX64ENV(showsegv))?LOG_NONE:LOG_DEBUG;
@@ -388,8 +388,12 @@ int my_sigactionhandler_oldcode_64(x64emu_t* emu, int32_t sig, int simple, sigin
     void* pc = NULL;
     if(p) {
         pc = (void*)CONTEXT_PC(p);
-        if(db)
-            frame = (uintptr_t)CONTEXT_REG(p, xRSP);    //this should not be needed, as emu has been "adjusted" to dynablock value already in the caller
+        if(db) {
+            if(ARCH_HOST_CALL(db, pc, x64pc))
+                frame = R_RSP;
+            else
+                frame = (uintptr_t)CONTEXT_REG(p, xRSP); //this should not be needed, as emu has been "adjusted" to dynablock value already in the caller
+        }
     }
 #else
     (void)ucntx; (void)cur_db;
@@ -757,7 +761,7 @@ void my_sigactionhandler_oldcode(x64emu_t* emu, int32_t sig, int simple, siginfo
     dynablock_t* db = cur_db;
     if(db && ucntx) {
         void * pc =(void*)CONTEXT_PC((ucontext_t*)ucntx);
-        copyUCTXreg2Emu(emu, ucntx, x64pc);
+        copyUCTXreg2Emu(emu, ucntx, db, x64pc);
         adjustregs(emu, pc);
         if(db && db->arch_size)
             ARCH_ADJUST(db, emu, ucntx, x64pc);
@@ -769,7 +773,7 @@ void my_sigactionhandler_oldcode(x64emu_t* emu, int32_t sig, int simple, siginfo
         direct_ret = my_sigactionhandler_oldcode_32(emu, sig, simple, info, ucntx, old_code, cur_db);
     } else
     #endif
-    direct_ret = my_sigactionhandler_oldcode_64(emu, sig, simple, info, ucntx, old_code, cur_db);
+    direct_ret = my_sigactionhandler_oldcode_64(emu, sig, simple, info, ucntx, old_code, cur_db, x64pc);
     if(direct_ret)
         return;
     #define GO(A) R_##A = old_##A
@@ -957,7 +961,7 @@ void my_box64signalhandler(int32_t sig, siginfo_t* info, void * ucntx)
                     return;
                 } else {
                     // dynablock got dirty! need to get out of it!!!
-                    copyUCTXreg2Emu(emu, p, x64pc);
+                    copyUCTXreg2Emu(emu, p, db, x64pc);
                     // only copy as it's a return address, so there is just the "epilog" to mimic here on "ret" type. "loop" type need everything
                     if(type_callret) {
                         adjustregs(emu, pc);
@@ -1010,7 +1014,7 @@ else dynarec_log(LOG_INFO, "SIGILL at %p/%p for Dynablock (%p, x64addr=%p) with 
             emu = getEmuSignal(emu, p, db);
             // dynablock got auto-dirty! need to get out of it!!!
             uintptr_t x64pc = getX64Address(db, (uintptr_t)pc);
-            copyUCTXreg2Emu(emu, p, x64pc);
+            copyUCTXreg2Emu(emu, p, db, x64pc);
             adjustregs(emu, pc);
             if(db && db->arch_size)
                 ARCH_ADJUST(db, emu, p, x64pc);
@@ -1258,7 +1262,7 @@ dynarec_log(/*LOG_DEBUG*/LOG_INFO, "%04d|Repeated SIGSEGV with Access error on %
         #undef GO
         #ifdef DYNAREC
         if(db)
-            copyUCTXreg2Emu(emu, p, x64pc);
+            copyUCTXreg2Emu(emu, p, db, x64pc);
         #endif
         nptrs = my_backtrace_ip(emu, buffer, BT_BUF_SIZE);
         strings = my_backtrace_symbols(emu, (uintptr_t*)buffer, nptrs);
@@ -1533,27 +1537,23 @@ __attribute__((alias("my_sigaction")));
 int EXPORT my_syscall_rt_sigaction(x64emu_t* emu, int signum, const x64_sigaction_restorer_t *act, x64_sigaction_restorer_t *oldact, int sigsetsize)
 {
     printf_log(LOG_DEBUG, "Syscall/Sigaction(signum=%d, act=%p, old=%p, size=%d)\n", signum, act, oldact, sigsetsize);
-    if(signum<0 || signum>MAX_SIGNAL) {
+    if (signum < 0 || signum > MAX_SIGNAL || sigsetsize != 8 /* sizeof(sigset_t) */) {
         errno = EINVAL;
         return -1;
     }
 
     if(signum==X64_SIGSEGV && emu->context->no_sigsegv)
         return 0;
-    size_t emulated_sigsetsize = sigsetsize > 0 ? (size_t)sigsetsize : 0;
-    if (emulated_sigsetsize > sizeof(sigset_t))
-        emulated_sigsetsize = sizeof(sigset_t);
-    // TODO, how to handle sigsetsize>4?!
     if(signum==32 || signum==33) {
         // cannot use libc sigaction, need to use syscall!
         struct kernel_sigaction newact = {0};
         struct kernel_sigaction old = {0};
-        size_t kernel_sigsetsize = emulated_sigsetsize > 16 ? 16 : emulated_sigsetsize;
+        size_t kernel_sigsetsize = sigsetsize > 16 ? 16 : sigsetsize;
         if(act) {
             printf_log(LOG_DEBUG, " New (kernel) action flags=0x%x mask=0x%lx\n", act->sa_flags, *(uint64_t*)&act->sa_mask);
             my_context->sigflags[signum] = act->sa_flags;
             memset(&my_context->sigmask[signum], 0, sizeof(sigset_t));
-            memcpy(&my_context->sigmask[signum], &act->sa_mask, emulated_sigsetsize);
+            memcpy(&my_context->sigmask[signum], &act->sa_mask, sigsetsize);
             memcpy(&newact.sa_mask, &act->sa_mask, kernel_sigsetsize);
             newact.sa_flags = act->sa_flags&~0x04000000;  // No sa_restorer...
             if(act->sa_flags&0x04) {
@@ -1595,13 +1595,13 @@ int EXPORT my_syscall_rt_sigaction(x64emu_t* emu, int signum, const x64_sigactio
         int box64_signal = is_box64_signal(signum);
         uintptr_t old_handler = my_context->signals[signum];
         if (oldact && box64_signal)
-            fill_emulated_sigaction_restorer(oldact, signum, old_handler, emulated_sigsetsize);
+            fill_emulated_sigaction_restorer(oldact, signum, old_handler, sigsetsize);
         if(act) {
             printf_log(LOG_DEBUG, " New action for signal #%d flags=0x%x mask=0x%lx\n", signum, act->sa_flags, *(uint64_t*)&act->sa_mask);
             my_context->sigflags[signum] = act->sa_flags;
             memset(&my_context->sigmask[signum], 0, sizeof(sigset_t));
-            memcpy(&my_context->sigmask[signum], &act->sa_mask, emulated_sigsetsize);
-            memcpy(&newact.sa_mask, &act->sa_mask, emulated_sigsetsize);
+            memcpy(&my_context->sigmask[signum], &act->sa_mask, sigsetsize);
+            memcpy(&newact.sa_mask, &act->sa_mask, sigsetsize);
             newact.sa_flags = act->sa_flags&~0x04000000;  // No sa_restorer...
             if (act->sa_flags & 0x04) {
                 my_context->signals[signum] = (uintptr_t)act->_u._sa_sigaction;
@@ -1631,7 +1631,7 @@ int EXPORT my_syscall_rt_sigaction(x64emu_t* emu, int signum, const x64_sigactio
             ret = sigaction(signal_from_x64(signum), act?&newact:NULL, oldact?&old:NULL);
         if (oldact && ret == 0 && !box64_signal) {
             oldact->sa_flags = old.sa_flags;
-            memcpy(&oldact->sa_mask, &old.sa_mask, emulated_sigsetsize > 8 ? 8 : emulated_sigsetsize);
+            memcpy(&oldact->sa_mask, &old.sa_mask, sigsetsize > 8 ? 8 : sigsetsize);
             if(old.sa_flags & 0x04)
                 oldact->_u._sa_sigaction = old.sa_sigaction; //TODO should wrap...
             else
