@@ -632,13 +632,13 @@ void call_c(dynarec_la64_t* dyn, int ninst, la64_consts_t fnc, int reg, int ret,
     dyn->last_ip = 0;
 }
 
-void call_n(dynarec_la64_t* dyn, int ninst, void* fnc, int w)
+void call_n(dynarec_la64_t* dyn, int ninst, void* fnc, int w, int nofpu)
 {
     MAYUSE(fnc);
     dyn->insts[ninst].host_call = 1;
     UP32_READALL();
     CHECK_DFNONE(1);
-    fpu_pushcache(dyn, ninst, x3, 1);
+    if (!nofpu) fpu_pushcache(dyn, ninst, x3, 1);
     ST_D(xRSP, xEmu, offsetof(x64emu_t, regs[_SP]));
     ST_D(xRBP, xEmu, offsetof(x64emu_t, regs[_BP]));
     ST_D(xRBX, xEmu, offsetof(x64emu_t, regs[_BX]));
@@ -660,20 +660,22 @@ void call_n(dynarec_la64_t* dyn, int ninst, void* fnc, int w)
     // Note that if need_reloc is active, the TABLE64 will trigger cancel block,
     // because native function might be very different on a next run: different function address, different brick, different everything basicaly
     // and we don't have a relocation mecanism here, it's too complex
-    MOVGR2FCSR(FCSR3, xZR);
+    if (!nofpu) MOVGR2FCSR(FCSR3, xZR);
     JIRL(xRA, x3, 0x0);
-    LA64_RESTORE_VZERO();
-    sse_fcsr3_from_mxcsr(dyn, ninst, x2);
+    if (!nofpu) {
+        LA64_RESTORE_VZERO();
+        sse_fcsr3_from_mxcsr(dyn, ninst, x2);
+    }
     // put return value in x64 regs
     if (w > 0) {
         MV(xRAX, A0);
-        MV(xRDX, A1);
+        if (!nofpu) MV(xRDX, A1);
     }
     // all done, restore all regs
     LD_D(xRSP, xEmu, offsetof(x64emu_t, regs[_SP]));
     LD_D(xRBP, xEmu, offsetof(x64emu_t, regs[_BP]));
     LD_D(xRBX, xEmu, offsetof(x64emu_t, regs[_BX]));
-    fpu_popcache(dyn, ninst, x3, 1);
+    if (!nofpu) fpu_popcache(dyn, ninst, x3, 1);
     NATIVE_RESTORE_X87PC();
     // SET_NODF();
 }
@@ -2204,6 +2206,51 @@ static void unloadCache(dynarec_la64_t* dyn, int ninst, int stack_cnt, int s1, i
     cache->lsxcache[i].v = 0;
 }
 
+static int vectorRegInCache(const lsxcache_t* cache, int n)
+{
+    for (int i = 0; i < 24; ++i) {
+        if (!cache->lsxcache[i].v)
+            continue;
+        switch (cache->lsxcache[i].t) {
+            case LSX_CACHE_XMM_S:
+            case LSX_CACHE_XMM_D:
+            case LSX_CACHE_XMMR:
+            case LSX_CACHE_XMMW:
+            case LSX_CACHE_YMMR:
+            case LSX_CACHE_YMMW:
+                if (cache->lsxcache[i].n == n)
+                    return 1;
+                break;
+            default:
+                break;
+        }
+    }
+    return 0;
+}
+
+static int canSkipFpuUnload(dynarec_la64_t* dyn, int i2, int type, int n)
+{
+    for (int k = i2; k < dyn->size; ++k) {
+        const instruction_la64_t* inst = &dyn->insts[k];
+        if (!inst->x64.alive)
+            return 0;
+        if ((inst->x64.barrier & BARRIER_FLOAT) || inst->x64.has_callret || inst->fpupurge || inst->host_call)
+            return 0;
+        const lsxcache_t* lsx = &inst->lsx;
+        if ((lsx->ymm_load | lsx->xmm_load) & (1 << n)) // read back from memory, cannot skip
+            return 0;
+        if (lsx->avxcache[n].v != -1) // full width write only, skip
+            return 1;
+        if (lsx->ssecache[n].v != -1)
+            return (type == LSX_CACHE_XMMW); // skip XMM write
+        if (lsx->scalarcache[n] != -1)
+            return 0;
+        if (inst->x64.jmp)
+            return 0;
+    }
+    return 0;
+}
+
 static void fpuCacheTransform(dynarec_la64_t* dyn, int ninst, int s1, int s2, int s3)
 {
     int i2 = dyn->insts[ninst].x64.jmp_insts;
@@ -2247,13 +2294,23 @@ static void fpuCacheTransform(dynarec_la64_t* dyn, int ninst, int s1, int s2, in
     int s2_val = 0;
     for (int i = 0; i < 16; ++i) {
         int j = findCacheSlot(dyn, ninst, LSX_CACHE_YMMW, i, &cache);
-        if (j >= 0 && findCacheSlot(dyn, ninst, LSX_CACHE_YMMW, i, &cache_i2) == -1)
-            unloadCache(dyn, ninst, stack_cnt, s1, s2, s3, &s1_val, &s2_val, &s3_top, &cache, j, cache.lsxcache[j].t, cache.lsxcache[j].n);
+        if (j >= 0 && findCacheSlot(dyn, ninst, LSX_CACHE_YMMW, i, &cache_i2) == -1) {
+            if (!vectorRegInCache(&cache_i2, i) && canSkipFpuUnload(dyn, i2, LSX_CACHE_YMMW, i)) {
+                MESSAGE(LOG_DUMP, "\t  - Dropping dead %s\n", getCacheName(cache.lsxcache[j].t, cache.lsxcache[j].n));
+                cache.lsxcache[j].v = 0;
+            } else
+                unloadCache(dyn, ninst, stack_cnt, s1, s2, s3, &s1_val, &s2_val, &s3_top, &cache, j, cache.lsxcache[j].t, cache.lsxcache[j].n);
+        }
     }
     for (int i = 0; i < 16; ++i) {
         int j = findCacheSlot(dyn, ninst, LSX_CACHE_XMMW, i, &cache);
-        if (j >= 0 && findCacheSlot(dyn, ninst, LSX_CACHE_XMMW, i, &cache_i2) == -1)
-            unloadCache(dyn, ninst, stack_cnt, s1, s2, s3, &s1_val, &s2_val, &s3_top, &cache, j, cache.lsxcache[j].t, cache.lsxcache[j].n);
+        if (j >= 0 && findCacheSlot(dyn, ninst, LSX_CACHE_XMMW, i, &cache_i2) == -1) {
+            if (!vectorRegInCache(&cache_i2, i) && canSkipFpuUnload(dyn, i2, LSX_CACHE_XMMW, i)) {
+                MESSAGE(LOG_DUMP, "\t  - Dropping dead %s\n", getCacheName(cache.lsxcache[j].t, cache.lsxcache[j].n));
+                cache.lsxcache[j].v = 0;
+            } else
+                unloadCache(dyn, ninst, stack_cnt, s1, s2, s3, &s1_val, &s2_val, &s3_top, &cache, j, cache.lsxcache[j].t, cache.lsxcache[j].n);
+        }
     }
     for (int i = 0; i < 8; ++i) {
         int j = findCacheSlot(dyn, ninst, LSX_CACHE_MM, i, &cache);
