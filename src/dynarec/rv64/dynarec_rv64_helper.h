@@ -791,6 +791,7 @@
 #define BNE_MARK3(reg1, reg2) Bxx_gen(NE, MARK3, reg1, reg2)
 // Branch to MARK3 if reg1!>=reg2 (use j64)
 #define BGE_MARK3(reg1, reg2) Bxx_gen(GE, MARK3, reg1, reg2)
+#define BGEU_MARK3(reg1, reg2) Bxx_gen(GEU, MARK3, reg1, reg2)
 // Branch to MARK if reg1<reg2 (use j64)
 #define BLTU_MARK3(reg1, reg2) Bxx_gen(LTU, MARK3, reg1, reg2)
 // Branch to MARK3 if reg1!=0 (use j64)
@@ -2036,21 +2037,32 @@ uintptr_t dynarec64_AVX_F3_0F_vector(dynarec_rv64_t* dyn, uintptr_t addr, uintpt
 
 #define PURGE_YMM()
 
-// TODO: zbb?
-#define SATw(reg, min, maxp1)   \
-    do {                        \
-        BGE(reg, min, 4 + 4);   \
-        MV(reg, min);           \
-        BLT(reg, maxp1, 4 + 4); \
-        ADDIW(reg, maxp1, -1);  \
+// reg is in [min, max], the supplied max is original max - 1.
+#define SATw(reg, min, max)        \
+    do {                           \
+        if (cpuext.zbb) {          \
+            MAX(reg, reg, min);    \
+            MIN(reg, reg, max);    \
+        } else {                   \
+            BGE(reg, min, 4 + 4);  \
+            MV(reg, min);          \
+            BLE(reg, max, 4 + 4);  \
+            MV(reg, max);          \
+        }                          \
     } while (0)
 
-#define SATUw(reg, maxu)       \
-    do {                       \
-        BGE(reg, xZR, 4 + 4);  \
-        MV(reg, xZR);          \
-        BLT(reg, maxu, 4 + 4); \
-        ADDIW(reg, maxu, -1);  \
+// reg is in [0, max], the supplied max is original max - 1.
+#define SATUw(reg, maxu)           \
+    do {                           \
+        if (cpuext.zbb) {          \
+            MAX(reg, reg, xZR);    \
+            MIN(reg, reg, maxu);   \
+        } else {                   \
+            BGE(reg, xZR, 4 + 4);  \
+            MV(reg, xZR);          \
+            BLE(reg, maxu, 4 + 4); \
+            MV(reg, maxu);         \
+        }                          \
     } while (0)
 
 #define FAST_8BIT_OPERATION(dst, src, s1, OP)                                            \
