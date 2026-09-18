@@ -902,6 +902,28 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
             } else
                 YMM0(gd);
             break;
+        case 0x2A:
+            INST_NAME("VMOVNTDQA Gx, Ex");
+            nextop = F8;
+            if (MODREG) {
+                break;
+            }
+            GETGX();
+            GETEX(x2, 0, vex.l ? 28 : 12);
+            GETGY();
+            LD(x4, wback, fixedaddress + 0);
+            SD(x4, gback, gdoffset + 0);
+            LD(x4, wback, fixedaddress + 8);
+            SD(x4, gback, gdoffset + 8);
+            if (vex.l) {
+                GETEY();
+                LD(x4, wback, fixedaddress + 0);
+                SD(x4, gback, gyoffset + 0);
+                LD(x4, wback, fixedaddress + 8);
+                SD(x4, gback, gyoffset + 8);
+            } else
+                YMM0(gd);
+            break;
         case 0x2B:
             INST_NAME("VPACKUSDW Gx, Vx, Ex");
             nextop = F8;
@@ -911,6 +933,7 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
             GETGX();
             GETGY();
             LUI(x5, 0x10); // 65536
+            ADDIW(x5, x5, -1);
             for (int i = 0; i < 4; ++i) {
                 LW(x3, vback, vxoffset + i * 4);
                 SATUw(x3, x5);
@@ -1128,7 +1151,7 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
                 if (cpuext.zbb)
                     MINU(x4, x3, x4);
                 else {
-                    BLTU(x3, x4, 4 + 4);
+                    BLTU(x4, x3, 4 + 4);
                     MV(x4, x3);
                 }
                 SH(x4, gback, gdoffset + i * 2);
@@ -1141,7 +1164,7 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
                     if (cpuext.zbb)
                         MINU(x4, x3, x4);
                     else {
-                        BLTU(x3, x4, 4 + 4);
+                        BLTU(x4, x3, 4 + 4);
                         MV(x4, x3);
                     }
                     SH(x4, gback, gyoffset + i * 2);
@@ -1163,7 +1186,7 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
                 if (cpuext.zbb)
                     MINU(x4, x3, x4);
                 else {
-                    BLTU(x3, x4, 4 + 4);
+                    BLTU(x4, x3, 4 + 4);
                     MV(x4, x3);
                 }
                 SW(x4, gback, gdoffset + i * 4);
@@ -1176,7 +1199,7 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
                     if (cpuext.zbb)
                         MINU(x4, x3, x4);
                     else {
-                        BLTU(x3, x4, 4 + 4);
+                        BLTU(x4, x3, 4 + 4);
                         MV(x4, x3);
                     }
                     SW(x4, gback, gyoffset + i * 4);

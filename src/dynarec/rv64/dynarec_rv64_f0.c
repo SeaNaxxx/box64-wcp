@@ -43,6 +43,38 @@ uintptr_t dynarec64_F0(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
     MAYUSE(j64);
 
     switch (opcode) {
+        case 0x00:
+            nextop = F8;
+            if (MODREG) {
+                INST_NAME("Invalid LOCK");
+                UDF();
+                *need_epilog = 1;
+                *ok = 0;
+            } else {
+                INST_NAME("LOCK ADD Eb, Gb");
+                SETFLAGS(X_ALL, SF_SET_PENDING, NAT_FLAGS_FUSION);
+                GETGB(x1);
+                addr = geted(dyn, addr, ninst, nextop, &wback, x6, x7, &fixedaddress, rex, LOCK_LOCK, 0, 0);
+                ANDI(x2, wback, 3);
+                SLLI(x2, x2, 3);
+                ANDI(x3, wback, ~3);
+                MARKLOCK;
+                LR_W(x4, x3, 1, 1);
+                SRL(x5, x4, x2);
+                ANDI(x5, x5, 0xFF); // old byte
+                ADD(x7, x5, x1);
+                ANDI(x7, x7, 0xFF); // new byte
+                SLL(x6, x5, x2);
+                SUB(x4, x4, x6);
+                SLL(x6, x7, x2);
+                ADD(x4, x4, x6);
+                SC_W(x6, x4, x3, 1, 1);
+                BNEZ_MARKLOCK(x6);
+                IFXORNAT (X_ALL | X_PEND) {
+                    emit_add8(dyn, ninst, x5, x1, x2, x3, x4);
+                }
+            }
+            break;
         case 0x01:
             nextop = F8;
             if (MODREG) {
@@ -343,8 +375,7 @@ uintptr_t dynarec64_F0(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
                                             MOV64xw(x6, 1LL << u8);       // bit mask
                                             MARKLOCK;
                                             LRxw(x4, x3, 1, 1);
-                                            SRLI(x5, x4, u8);
-                                            ANDI(x7, x5, 1);              // old bit
+                                            BEXTI(x7, x4, u8);            // old bit
                                             ANDI(xFlags, xFlags, ~1);
                                             OR(xFlags, xFlags, x7);       // CF = old bit
                                             SLLI(x7, x7, u8);             // old bit at position
@@ -496,7 +527,8 @@ uintptr_t dynarec64_F0(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
                                     ANDI(xFlags, xFlags, ~(1 << F_ZF));
                                     // there is no atomic move on 16bytes, so implement it with mutex
                                     LD(x7, xEmu, offsetof(x64emu_t, context));
-                                    ADDI(x7, x7, offsetof(box64context_t, mutex_16b));
+                                    MOV32w(x3, offsetof(box64context_t, mutex_16b));
+                                    ADD(x7, x7, x3);
                                     ADDI(x4, xZR, 1);
                                     MARK2;
                                     AMOSWAP_W(x4, x4, x7, 1, 1);
@@ -680,6 +712,38 @@ uintptr_t dynarec64_F0(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
                 AMOANDxw(x1, gd, wback, 1, 1);
                 IFXORNAT (X_ALL | X_PEND)
                     emit_and32(dyn, ninst, rex, x1, gd, x3, x4);
+            }
+            break;
+        case 0x28:
+            nextop = F8;
+            if (MODREG) {
+                INST_NAME("Invalid LOCK");
+                UDF();
+                *need_epilog = 1;
+                *ok = 0;
+            } else {
+                INST_NAME("LOCK SUB Eb, Gb");
+                SETFLAGS(X_ALL, SF_SET_PENDING, NAT_FLAGS_FUSION);
+                GETGB(x1);
+                addr = geted(dyn, addr, ninst, nextop, &wback, x6, x7, &fixedaddress, rex, LOCK_LOCK, 0, 0);
+                ANDI(x2, wback, 3);
+                SLLI(x2, x2, 3);
+                ANDI(x3, wback, ~3);
+                MARKLOCK;
+                LR_W(x4, x3, 1, 1);
+                SRL(x5, x4, x2);
+                ANDI(x5, x5, 0xFF); // old byte
+                SUB(x7, x5, x1);
+                ANDI(x7, x7, 0xFF); // new byte
+                SLL(x6, x5, x2);
+                SUB(x4, x4, x6);
+                SLL(x6, x7, x2);
+                ADD(x4, x4, x6);
+                SC_W(x6, x4, x3, 1, 1);
+                BNEZ_MARKLOCK(x6);
+                IFXORNAT (X_ALL | X_PEND) {
+                    emit_sub8(dyn, ninst, x5, x1, x2, x3, x4);
+                }
             }
             break;
         case 0x29:
@@ -1294,13 +1358,13 @@ uintptr_t dynarec64_F0(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
                     INST_NAME("LOCK NEG Ed");
                     SETFLAGS(X_ALL, SF_SET_PENDING, NAT_FLAGS_FUSION);
                     addr = geted(dyn, addr, ninst, nextop, &wback, x5, x6, &fixedaddress, rex, LOCK_LOCK, 0, 0);
-                    ANDI(x1, wback, 3);
-                    BNEZ_MARK3(x1); // not 4 bytes aligned
-                    ANDI(x7, wback, ~3);
+                    ANDI(x1, wback, (1 << (rex.w + 2)) - 1);
+                    BNEZ_MARK3(x1); // not aligned
+                    ANDI(x7, wback, -(1 << (rex.w + 2)));
                     MARKLOCK;
-                    LR_W(x4, x7, 1, 1);
+                    LRxw(x4, x7, 1, 1);
                     NEGxw(x1, x4);
-                    SC_W(x6, x1, x7, 1, 1);
+                    SCxw(x6, x1, x7, 1, 1);
                     BNEZ_MARKLOCK(x6);
                     MV(x1, x4); // committed original value
                     emit_neg32(dyn, ninst, rex, x1, x2, x3, x4, x6);
