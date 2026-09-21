@@ -2250,11 +2250,9 @@ uintptr_t dynarec64_660F_vector(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
                 GETGX_vector(v0, 1, VECTOR_SEW64);
                 GETEX_vector(v1, 0, 0, VECTOR_SEW64);
                 d1 = fpu_get_scratch(dyn);
-                ADDI(x2, xZR, 32);
-                VSLL_VX(v0, v0, x2, VECTOR_UNMASKED);
-                VSRL_VX(v0, v0, x2, VECTOR_UNMASKED);
-                VSLL_VX(d1, v1, x2, VECTOR_UNMASKED);
-                VSRL_VX(d1, d1, x2, VECTOR_UNMASKED);
+                MOV64x(x2, 0xffffffffULL);
+                VAND_VX(v0, v0, x2, VECTOR_UNMASKED);
+                VAND_VX(d1, v1, x2, VECTOR_UNMASKED);
                 VMUL_VV(v0, v0, d1, VECTOR_UNMASKED);
             } else {
                 SET_ELEMENT_WIDTH(x1, VECTOR_SEW32, 1);
@@ -2351,9 +2349,7 @@ uintptr_t dynarec64_660F_vector(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
             GETGX_vector(q0, 0, VECTOR_SEW8);
             GETEX_vector(q1, 0, 0, VECTOR_SEW8);
             q2 = fpu_get_scratch(dyn);
-            VMV_V_V(q2, q1);
-            VSRL_VI(q2, q2, 7, VECTOR_UNMASKED);
-            VMSNE_VX(VMASK, q2, xZR, VECTOR_UNMASKED);
+            VMSLT_VX(VMASK, q1, xZR, VECTOR_UNMASKED);
             VLE8_V(q2, xRDI, VECTOR_UNMASKED, VECTOR_NFIELD1);
             VMERGE_VVM(q2, q2, q0);
             VSE8_V(q2, xRDI, VECTOR_UNMASKED, VECTOR_NFIELD1);
