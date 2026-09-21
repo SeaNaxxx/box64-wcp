@@ -52,8 +52,8 @@
     } while (0)
 #define ZEROUP(r) ZEXTW2(r, r)
 
-#define R_type(funct7, rs2, rs1, funct3, rd, opcode) ((funct7) << 25 | (rs2) << 20 | (rs1) << 15 | (funct3) << 12 | (rd) << 7 | (opcode))
-#define I_type(imm12, rs1, funct3, rd, opcode)       ((imm12) << 20 | (rs1) << 15 | (funct3) << 12 | (rd) << 7 | (opcode))
+#define R_type(funct7, rs2, rs1, funct3, rd, opcode) ((funct7) << 25 | (rs2) << 20 | ((rs1) & 0x1f) << 15 | (funct3) << 12 | (rd) << 7 | (opcode))
+#define I_type(imm12, rs1, funct3, rd, opcode)       ((imm12) << 20 | ((rs1) & 0x1f) << 15 | (funct3) << 12 | (rd) << 7 | (opcode))
 #define S_type(imm12, rs2, rs1, funct3, opcode)      (((imm12) >> 5) << 25 | (rs2) << 20 | (rs1) << 15 | (funct3) << 12 | ((imm12) & 31) << 7 | (opcode))
 #define B_type(imm13, rs2, rs1, funct3, opcode)      ((((imm13) >> 12) & 1) << 31 | (((imm13) >> 5) & 63) << 25 | (rs2) << 20 | (rs1) << 15 | (funct3) << 12 | (((imm13) >> 1) & 15) << 8 | (((imm13) >> 11) & 1) << 7 | (opcode))
 #define U_type(imm32, rd, opcode)                    (((imm32) >> 12) << 12 | (rd) << 7 | (opcode))
@@ -978,11 +978,31 @@
 
 // Zbb
 //  AND with reverted operand (rs1 & ~rs2)
-#define ANDN(rd, rs1, rs2) EMIT(R_type(0b0100000, rs2, rs1, 0b111, rd, 0b0110011))
+#define ANDN_(rd, rs1, rs2) EMIT(R_type(0b0100000, rs2, rs1, 0b111, rd, 0b0110011))
 // OR with reverted operand (rs1 | ~rs2)
-#define ORN(rd, rs1, rs2) EMIT(R_type(0b0100000, rs2, rs1, 0b110, rd, 0b0110011))
+#define ORN_(rd, rs1, rs2) EMIT(R_type(0b0100000, rs2, rs1, 0b110, rd, 0b0110011))
 // Exclusive NOR (~(rs1 ^ rs2))
 #define XNOR(rd, rs1, rs2) EMIT(R_type(0b0100000, rs2, rs1, 0b100, rd, 0b0110011))
+// AND with reverted operand, with fallback (s0 is used as a scratch register)
+#define ANDN(rd, rs1, rs2, s0)   \
+    do {                         \
+        if (cpuext.zbb)          \
+            ANDN_(rd, rs1, rs2); \
+        else {                   \
+            NOT(s0, rs2);        \
+            AND(rd, rs1, s0);    \
+        }                        \
+    } while (0)
+// OR with reverted operand, with fallback (s0 is used as a scratch register)
+#define ORN(rd, rs1, rs2, s0)    \
+    do {                         \
+        if (cpuext.zbb)          \
+            ORN_(rd, rs1, rs2);  \
+        else {                   \
+            NOT(s0, rs2);        \
+            OR(rd, rs1, s0);     \
+        }                        \
+    } while (0)
 // Count leading zero bits
 #define CLZ(rd, rs) EMIT(R_type(0b0110000, 0b00000, rs, 0b001, rd, 0b0010011))
 // Count leading zero bits in word
@@ -1075,7 +1095,19 @@
 // Unsigned minimum
 #define MINU(rd, rs1, rs2) EMIT(R_type(0b0000101, rs2, rs1, 0b101, rd, 0b0110011))
 // Sign-extend byte
-#define SEXTB(rd, rs) EMIT(R_type(0b0110000, 0b00100, rs, 0b001, rd, 0b0010011))
+#define SEXTB_(rd, rs) EMIT(R_type(0b0110000, 0b00100, rs, 0b001, rd, 0b0010011))
+// Sign-extend byte
+#define SEXTB(rd, rs)             \
+    do {                          \
+        if (cpuext.zbb)           \
+            SEXTB_(rd, rs);       \
+        else if (cpuext.xtheadbb) \
+            TH_EXT(rd, rs, 7, 0); \
+        else {                    \
+            SLLI(rd, rs, 56);     \
+            SRAI(rd, rd, 56);     \
+        }                         \
+    } while (0)
 // Sign-extend half-word
 #define SEXTH_(rd, rs) EMIT(R_type(0b0110000, 0b00101, rs, 0b001, rd, 0b0010011))
 // Sign-extend half-word
@@ -1226,7 +1258,18 @@
 // Single-bit Set (Register)
 #define BSET(rd, rs1, rs2) EMIT(R_type(0b0010100, rs2, rs1, 0b001, rd, 0b0110011))
 // Single-bit Set (Immediate)
-#define BSETI(rd, rs1, imm) EMIT(R_type(0b0010100, imm, rs1, 0b001, rd, 0b0010011))
+#define BSETI_(rd, rs1, imm) EMIT(R_type(0b0010100, imm, rs1, 0b001, rd, 0b0010011))
+// Single-bit Set (Immediate), with fallback (s0 is used as a scratch register)
+#define BSETI(rd, rs1, imm, s0)   \
+    do {                          \
+        if (cpuext.zbs)           \
+            BSETI_(rd, rs1, imm); \
+        else {                    \
+            ADDI(s0, xZR, 1);     \
+            SLLI(s0, s0, (imm));  \
+            OR(rd, rs1, s0);      \
+        }                         \
+    } while (0)
 
 // Single-bit Extract (Register)
 #define BEXT(rd, rs1, rs2, s0)              \
