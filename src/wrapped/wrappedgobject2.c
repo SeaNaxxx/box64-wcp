@@ -706,30 +706,37 @@ EXPORT unsigned long my_g_signal_handler_find(x64emu_t* emu, void* instance, uin
 
 EXPORT void* my_g_object_new(x64emu_t* emu, size_t type, void* first, void* b)
 {
+    if(first) {
+        uintptr_t scratch[6 + 20];
+        CREATE_VALIST_FROM_VAARG(b, scratch, 2);
+        void* klass = my->g_type_class_ref(type);
+        if(klass) {
+            unwrapGTKClass(klass, type);
+            my->g_type_class_unref(klass);
+        }
+        return my->g_object_new_valist(type, first, VARARGS);
+    }
     void* klass = my->g_type_class_ref(type);
     if(klass) {
         unwrapGTKClass(klass, type);
         my->g_type_class_unref(klass);
-    }
-    if(first) {
-        CREATE_VALIST_FROM_VAARG(b, emu->scratch, 2);
-        return my->g_object_new_valist(type, first, VARARGS);
     }
     return my->g_object_new(type, first);
 }
 
 EXPORT void* my_g_object_new_valist(x64emu_t* emu, size_t type, void* first, x64_va_list_t b)
 {
+    #ifdef CONVERT_VALIST
+    CONVERT_VALIST(b);
+    #else
+    uintptr_t scratch[6 + 20];
+    CREATE_VALIST_FROM_VALIST(b, scratch);
+    #endif
     void* klass = my->g_type_class_ref(type);
     if(klass) {
         unwrapGTKClass(klass, type);
         my->g_type_class_unref(klass);
     }
-    #ifdef CONVERT_VALIST
-    CONVERT_VALIST(b);
-    #else
-    CREATE_VALIST_FROM_VALIST(b, emu->scratch);
-    #endif
     return my->g_object_new_valist(type, first, VARARGS);
 }
 
@@ -1015,5 +1022,51 @@ EXPORT size_t my_g_type_module_register_type(x64emu_t* emu, my_GTypeModule_t* mo
     SetGTypeParent(my->g_type_parent);
 
 #define NEEDED_LIBS "libglib-2.0.so.0"
+
+EXPORT void* my_g_cclosure_new_object(x64emu_t* emu, void* callback, void* object)
+{
+    return my->g_cclosure_new_object(findGCallbackFct(callback), object);
+}
+
+EXPORT void* my_g_cclosure_new_object_swap(x64emu_t* emu, void* callback, void* object)
+{
+    return my->g_cclosure_new_object_swap(findGCallbackFct(callback), object);
+}
+
+EXPORT void my_g_closure_add_invalidate_notifier(x64emu_t* emu, void* closure, void* data, void* f)
+{
+    my->g_closure_add_invalidate_notifier(closure, data, findGClosureNotify_Fct(f));
+}
+
+EXPORT void my_g_closure_remove_invalidate_notifier(x64emu_t* emu, void* closure, void* data, void* f)
+{
+    my->g_closure_remove_invalidate_notifier(closure, data, findGClosureNotify_Fct(f));
+}
+
+EXPORT void my_g_signal_chain_from_overridden_handler(x64emu_t* emu, void* instance, void* b)
+{
+    CREATE_VALIST_FROM_VAARG(b, emu->scratch, 1);
+    my->g_signal_chain_from_overridden_handler(instance, VARARGS);
+}
+
+EXPORT uint32_t my_g_signal_new_class_handler(x64emu_t* emu, void* name, size_t itype, uint32_t flags, void* class_handler, void* acc, void* accu_data, void* marsh, size_t rtype, uint32_t n, void** b)
+{
+    void* cb_class = findGCallbackFct(class_handler);
+    void* cb_acc = findAccumulatorFct(acc);
+    void* cb_marsh = findMarshalFct(marsh);
+    switch(n) {
+        case 0: return my->g_signal_new_class_handler(name, itype, flags, cb_class, cb_acc, accu_data, cb_marsh, rtype, n);
+        case 1: return my->g_signal_new_class_handler(name, itype, flags, cb_class, cb_acc, accu_data, cb_marsh, rtype, n, b[0]);
+        case 2: return my->g_signal_new_class_handler(name, itype, flags, cb_class, cb_acc, accu_data, cb_marsh, rtype, n, b[0], b[1]);
+        case 3: return my->g_signal_new_class_handler(name, itype, flags, cb_class, cb_acc, accu_data, cb_marsh, rtype, n, b[0], b[1], b[2]);
+        case 4: return my->g_signal_new_class_handler(name, itype, flags, cb_class, cb_acc, accu_data, cb_marsh, rtype, n, b[0], b[1], b[2], b[3]);
+        case 5: return my->g_signal_new_class_handler(name, itype, flags, cb_class, cb_acc, accu_data, cb_marsh, rtype, n, b[0], b[1], b[2], b[3], b[4]);
+        case 6: return my->g_signal_new_class_handler(name, itype, flags, cb_class, cb_acc, accu_data, cb_marsh, rtype, n, b[0], b[1], b[2], b[3], b[4], b[5]);
+        case 7: return my->g_signal_new_class_handler(name, itype, flags, cb_class, cb_acc, accu_data, cb_marsh, rtype, n, b[0], b[1], b[2], b[3], b[4], b[5], b[6]);
+        case 8: return my->g_signal_new_class_handler(name, itype, flags, cb_class, cb_acc, accu_data, cb_marsh, rtype, n, b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
+    }
+    printf_log(LOG_NONE, "Warning, gobject g_signal_new_class_handler called with too many parameters (%d)\n", n);
+    return my->g_signal_new_class_handler(name, itype, flags, cb_class, cb_acc, accu_data, cb_marsh, rtype, n, b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
+}
 
 #include "wrappedlib_init.h"
