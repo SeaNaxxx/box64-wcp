@@ -31,6 +31,8 @@
 #include "dynacache_hashes.h"
 #endif
 
+extern int box64_in_fatal_handler;
+
 #ifdef _WIN32
 #define PATHSEP "\\"
 #define HOME    "USERPROFILE"
@@ -92,7 +94,7 @@ done:
     `box64 --dynacache-clean` can be used from command line to purge obsolete DyaCache files
 */
 
-#define FILE_VERSION 6
+#define FILE_VERSION 7
 #define HEADER_SIGN  "DynaCache"
 
 typedef struct DynaCacheHeader_s {
@@ -435,6 +437,7 @@ void SerializeMmaplist(mapping_t* mapping)
     (void)mapping;
     return;
     #else
+    if(box64_in_fatal_handler) return;
     if(!DYNAREC_VERSION)
         return;
     if(mapping->env && mapping->env->is_dynacache_overridden && (mapping->env->dynacache!=1))
@@ -1000,7 +1003,14 @@ void MmapDynaCache(mapping_t* mapping)
     const char* name = GetMmaplistName(mapping);
     if(!name) return;
     dynarec_log(LOG_DEBUG, "Looking for DynaCache %s in %s\n", name, folder);
-    ReadDynaCache(folder, name, mapping, 0);
+    int ret = ReadDynaCache(folder, name, mapping, 0);
+    if(ret && ret!=DCERR_NEXIST) {
+        char filename[strlen(folder)+strlen(name)+1];
+        strcpy(filename, folder);
+        strcat(filename, name);
+        if(!unlink(filename))
+            dynarec_log(LOG_INFO, "Removed invalid DynaCache %s\n", name);
+    }
 }
 #endif
 #else

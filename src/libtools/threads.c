@@ -19,6 +19,7 @@
 #include "box64cpu.h"
 #include "box64cpu_util.h"
 #include "callback.h"
+#include "cleanup.h"
 #include "custommem.h"
 #include "khash.h"
 #include "emu/x64run_private.h"
@@ -37,7 +38,7 @@
 #endif
 #include <stdatomic.h>
 
-static _Atomic int g_active_emu_workers = 0;
+_Atomic int g_active_emu_workers = 0;
 //void _pthread_cleanup_push_defer(void* buffer, void* routine, void* arg);	// declare hidden functions
 //void _pthread_cleanup_pop_restore(void* buffer, int exec);
 typedef void (*vFppp_t)(void*, void*, void*);
@@ -191,6 +192,7 @@ void emuthread_destroy(void* p)
 	if(et->is32bits && !et->join && et->fnc)
 		to_hash_d(et->self);
 	#endif
+	CallThreadCleanup(et->emu);
 	FreeX64Emu(&et->emu);
 	#ifdef BAD_PKILL
 	del_thread((void*)et->self);
@@ -344,10 +346,6 @@ static void* pthread_routine(void* p)
 	atomic_fetch_sub_explicit(&g_active_emu_workers, 1, memory_order_relaxed);
 	//void* ret = (void*)RunFunctionWithEmu(et->emu, 0, et->fnc, 1, et->arg);
 	return ret;
-}
-
-	int get_active_emu_workers(void) {
-		return atomic_load_explicit(&g_active_emu_workers, memory_order_relaxed);
 }
 
 #ifdef NOALIGN

@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <signal.h>
 #include <errno.h>
 #include <setjmp.h>
@@ -96,10 +97,12 @@ static void emuthread_cancel(void* p)
     box_free(et->cancels);
     et->cancels=NULL;
     et->cancel_size = et->cancel_cap = 0;
+    atomic_fetch_sub_explicit(&g_active_emu_workers, 1, memory_order_relaxed);
 }
 
 static void* pthread_routine(void* p)
 {
+    atomic_fetch_add_explicit(&g_active_emu_workers, 1, memory_order_relaxed);
     // free current emuthread if it exist
     {
         void* t = thread_get_et();
@@ -111,6 +114,8 @@ static void* pthread_routine(void* p)
     }
     // call the function
     emuthread_t *et = (emuthread_t*)p;
+    while(et->pthread_t_addr && !__atomic_load_n(&et->pthread_t_ready, __ATOMIC_ACQUIRE))
+        SchedYield();
     thread_set_et(et);
     et->is32bits = 1;
     et->emu->type = EMUTYPE_MAIN;
@@ -132,6 +137,7 @@ static void* pthread_routine(void* p)
     DynaRun(et->emu);
     pthread_cleanup_pop(0);
     void* ret = from_ptrv(R_EAX);
+    atomic_fetch_sub_explicit(&g_active_emu_workers, 1, memory_order_relaxed);
     return ret;
 }
 
@@ -219,6 +225,7 @@ EXPORT int my32_pthread_create(x64emu_t *emu, void* t, void* attr, void* start_r
     et->emu = emuthread;
     et->fnc = (uintptr_t)start_routine;
     et->arg = arg;
+    et->pthread_t_addr = t;
     if(!attr)
         et->join = 1;
     else {
@@ -244,9 +251,11 @@ EXPORT int my32_pthread_create(x64emu_t *emu, void* t, void* attr, void* start_r
     }
     #endif
     // create thread
-    int ret = pthread_create((pthread_t*)t, my_attr?my_attr:get_attr(attr), 
-        pthread_routine, et);
+    pthread_t pth = 0;
+    int ret = pthread_create(&pth, my_attr?my_attr:get_attr(attr), pthread_routine, et);
     if(my_attr) pthread_attr_destroy(my_attr);
+    if(!ret && t) *(ulong_t*)t = (ulong_t)to_hash((uintptr_t)pth);
+    __atomic_store_n(&et->pthread_t_ready, 1, __ATOMIC_RELEASE);
     return ret;
 }
 
