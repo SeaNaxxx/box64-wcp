@@ -777,7 +777,7 @@ uintptr_t dynarec64_660F38(dynarec_rv64_t* dyn, uintptr_t addr, uint8_t opcode, 
                     if (cpuext.zvkned) {
                         SET_ELEMENT_WIDTH(x1, VECTOR_SEW32, 1);
                         GETGX_vector(v0, 1, VECTOR_SEW32);
-                        GETEX_vector(v1, 0, 8, VECTOR_SEW32);
+                        GETEX_vector(v1, 0, 0, VECTOR_SEW32);
                         v2 = fpu_get_scratch(dyn);
                         MOV32w(x4, 0x63636363);
                         VMV_V_X(v2, x4);
@@ -798,7 +798,7 @@ uintptr_t dynarec64_660F38(dynarec_rv64_t* dyn, uintptr_t addr, uint8_t opcode, 
                     if (cpuext.zvkned) {
                         SET_ELEMENT_WIDTH(x1, VECTOR_SEW32, 1);
                         GETGX_vector(v0, 1, VECTOR_SEW32);
-                        GETEX_vector(v1, 0, 8, VECTOR_SEW32);
+                        GETEX_vector(v1, 0, 0, VECTOR_SEW32);
                         VAESEM_VV(v0, v1);
                         break;
                     }
@@ -826,7 +826,7 @@ uintptr_t dynarec64_660F38(dynarec_rv64_t* dyn, uintptr_t addr, uint8_t opcode, 
                     if (cpuext.zvkned) {
                         SET_ELEMENT_WIDTH(x1, VECTOR_SEW32, 1);
                         GETGX_vector(v0, 1, VECTOR_SEW32);
-                        GETEX_vector(v1, 0, 8, VECTOR_SEW32);
+                        GETEX_vector(v1, 0, 0, VECTOR_SEW32);
                         VAESEF_VV(v0, v1);
                         break;
                     }
@@ -854,7 +854,7 @@ uintptr_t dynarec64_660F38(dynarec_rv64_t* dyn, uintptr_t addr, uint8_t opcode, 
                     if (cpuext.zvkned) {
                         SET_ELEMENT_WIDTH(x1, VECTOR_SEW32, 1);
                         GETGX_vector(v0, 1, VECTOR_SEW32);
-                        GETEX_vector(v1, 0, 8, VECTOR_SEW32);
+                        GETEX_vector(v1, 0, 0, VECTOR_SEW32);
                         if (v0 == v1) {
                             v2 = fpu_get_scratch(dyn);
                             VMV_V_V(v2, v1);
@@ -895,7 +895,7 @@ uintptr_t dynarec64_660F38(dynarec_rv64_t* dyn, uintptr_t addr, uint8_t opcode, 
                     if (cpuext.zvkned) {
                         SET_ELEMENT_WIDTH(x1, VECTOR_SEW32, 1);
                         GETGX_vector(v0, 1, VECTOR_SEW32);
-                        GETEX_vector(v1, 0, 8, VECTOR_SEW32);
+                        GETEX_vector(v1, 0, 0, VECTOR_SEW32);
                         VAESDF_VV(v0, v1);
                         break;
                     }
@@ -1603,6 +1603,11 @@ uintptr_t dynarec64_660F38(dynarec_rv64_t* dyn, uintptr_t addr, uint8_t opcode, 
                         ed = x1;
                     } else {
                         addr = geted(dyn, addr, ninst, nextop, &ed, x1, x2, &fixedaddress, rex, NULL, 0, 1);
+                        // the address is passed as an argument to the helper, so it must not stay in a guest register
+                        if (ed != x1 || fixedaddress) {
+                            ADDI(x1, ed, fixedaddress);
+                            ed = x1;
+                        }
                     }
                     SEXT_W(x2, xRDX);
                     SEXT_W(x4, xRAX);
@@ -1646,6 +1651,11 @@ uintptr_t dynarec64_660F38(dynarec_rv64_t* dyn, uintptr_t addr, uint8_t opcode, 
                         ed = x1;
                     } else {
                         addr = geted(dyn, addr, ninst, nextop, &ed, x1, x2, &fixedaddress, rex, NULL, 0, 1);
+                        // the address is passed as an argument to the helper, so it must not stay in a guest register
+                        if (ed != x1 || fixedaddress) {
+                            ADDI(x1, ed, fixedaddress);
+                            ed = x1;
+                        }
                     }
                     SEXT_W(x2, xRDX);
                     SEXT_W(x4, xRAX);
@@ -1679,6 +1689,11 @@ uintptr_t dynarec64_660F38(dynarec_rv64_t* dyn, uintptr_t addr, uint8_t opcode, 
                         ed = x1;
                     } else {
                         addr = geted(dyn, addr, ninst, nextop, &ed, x1, x2, &fixedaddress, rex, NULL, 0, 1);
+                        // the address is passed as an argument to the helper, so it must not stay in a guest register
+                        if (ed != x1 || fixedaddress) {
+                            ADDI(x1, ed, fixedaddress);
+                            ed = x1;
+                        }
                     }
                     ADDI(x2, xEmu, offsetof(x64emu_t, xmm[gd]));
                     u8 = F8;
