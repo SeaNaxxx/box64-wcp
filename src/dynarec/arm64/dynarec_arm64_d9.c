@@ -237,11 +237,11 @@ uintptr_t dynarec64_D9(dynarec_arm_t* dyn, uintptr_t addr, uintptr_t ip, int nin
                 && PK(2)==0xD9 && PK(3)==0xF3
             ) {
                 MESSAGE(LOG_DUMP, "Hack for FLD1 FLD1 FPATAN");
-                X87_PUSH_OR_FAIL(v1, dyn, ninst, x1, NEON_CACHE_ST_F);
+                X87_PUSH_OR_FAIL(v1, dyn, ninst, x1, (BOX64ENV(dynarec_x87double)==1)?NEON_CACHE_ST_D:NEON_CACHE_ST_F);
                 FTABLE64(v1, PI/4.0);
                 addr+=4;
             } else {
-                X87_PUSH_OR_FAIL(v1, dyn, ninst, x1, NEON_CACHE_ST_F);
+                X87_PUSH_OR_FAIL(v1, dyn, ninst, x1, (BOX64ENV(dynarec_x87double)==1)?NEON_CACHE_ST_D:NEON_CACHE_ST_F);
                 if(ST_IS_F(0)) {
                     FMOVS_8(v1, 0b01110000);
                 } else {
@@ -276,7 +276,7 @@ uintptr_t dynarec64_D9(dynarec_arm_t* dyn, uintptr_t addr, uintptr_t ip, int nin
             break;
         case 0xEE:
             INST_NAME("FLDZ");
-            X87_PUSH_OR_FAIL(v1, dyn, ninst, x1, NEON_CACHE_ST_F);
+            X87_PUSH_OR_FAIL(v1, dyn, ninst, x1, (BOX64ENV(dynarec_x87double)==1)?NEON_CACHE_ST_D:NEON_CACHE_ST_F);
             VEOR(v1, v1, v1);
             break;
 
@@ -303,7 +303,7 @@ uintptr_t dynarec64_D9(dynarec_arm_t* dyn, uintptr_t addr, uintptr_t ip, int nin
                 u8 = F8;
                 v1 = x87_get_st(dyn, ninst, x1, x2, 0, NEON_CACHE_ST_D);
             } else {
-                X87_PUSH_OR_FAIL(v2, dyn, ninst, x1, NEON_CACHE_ST_F);
+                X87_PUSH_OR_FAIL(v2, dyn, ninst, x1, (BOX64ENV(dynarec_x87double)==1)?NEON_CACHE_ST_D:NEON_CACHE_ST_F);
                 if(ST_IS_F(0)) {
                     FMOVS_8(v2, 0b01110000);
                 } else {
@@ -450,9 +450,19 @@ uintptr_t dynarec64_D9(dynarec_arm_t* dyn, uintptr_t addr, uintptr_t ip, int nin
             if(!BOX64ENV(dynarec_fastround))
                 u8 = x87_setround(dyn, ninst, x1, x2, x4);
             if(ST_IS_F(0)) {
+                FCMPS_0(v1);
                 FSQRTS(v1, v1);
+                v2 = fpu_get_scratch(dyn, ninst);
+                MOV32w(x3, X87_REAL_INDEFINITE_FLOAT);
+                FMOVSw(v2, x3);
+                FCSELS(v1, v2, v1, cMI); // MI: less than, not unordered
             } else {
+                FCMPD_0(v1);
                 FSQRTD(v1, v1);
+                v2 = fpu_get_scratch(dyn, ninst);
+                MOV64x(x3, X87_REAL_INDEFINITE_DOUBLE);
+                FMOVDx(v2, x3);
+                FCSELD(v1, v2, v1, cMI); // MI: less than, not unordered
             }
             X87_CHECK_PRECISION(v1);
             if(!BOX64ENV(dynarec_fastround))

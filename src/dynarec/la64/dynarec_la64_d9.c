@@ -36,10 +36,13 @@ uintptr_t dynarec64_D9(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
     int64_t fixedaddress;
     int unscaled;
     int v0, v1, v2;
+    int q0, q1;
     int s0;
     int i1, i2, i3;
     int64_t j64;
 
+    MAYUSE(q0);
+    MAYUSE(q1);
     MAYUSE(s0);
     MAYUSE(v0);
     MAYUSE(v1);
@@ -203,7 +206,7 @@ uintptr_t dynarec64_D9(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
 
             case 0xE8:
                 INST_NAME("FLD1");
-                X87_PUSH_OR_FAIL(v1, dyn, ninst, x1, LSX_CACHE_ST_F);
+                X87_PUSH_OR_FAIL(v1, dyn, ninst, x1, (BOX64ENV(dynarec_x87double) == 1) ? LSX_CACHE_ST_D : LSX_CACHE_ST_F);
                 if (ST_IS_F(0)) {
                     MOV32w(x1, 0x3f800000);
                     MOVGR2FR_W(v1, x1);
@@ -239,7 +242,7 @@ uintptr_t dynarec64_D9(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
                 break;
             case 0xEE:
                 INST_NAME("FLDZ");
-                X87_PUSH_OR_FAIL(v1, dyn, ninst, x1, LSX_CACHE_ST_F);
+                X87_PUSH_OR_FAIL(v1, dyn, ninst, x1, (BOX64ENV(dynarec_x87double) == 1) ? LSX_CACHE_ST_D : LSX_CACHE_ST_F);
                 if (ST_IS_F(0))
                     MOVGR2FR_W(v1, xZR);
                 else
@@ -273,7 +276,7 @@ uintptr_t dynarec64_D9(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
                 CALL_(const_native_ftan, -1, BOX64ENV(dynarec_fastround) ? 0 : u8, 0, 0);
                 if (!BOX64ENV(dynarec_fastround)) x87_restoreround(dyn, ninst, u8);
                 x87_unstackcount(dyn, ninst, x3, s0);
-                X87_PUSH_OR_FAIL(v1, dyn, ninst, x1, LSX_CACHE_ST_F);
+                X87_PUSH_OR_FAIL(v1, dyn, ninst, x1, (BOX64ENV(dynarec_x87double) == 1) ? LSX_CACHE_ST_D : LSX_CACHE_ST_F);
                 if (ST_IS_F(0)) {
                     MOV32w(x1, 0x3f800000);
                     MOVGR2FR_W(v1, x1);
@@ -351,7 +354,22 @@ uintptr_t dynarec64_D9(dynarec_la64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
                 INST_NAME("FSQRT");
                 v1 = x87_get_st(dyn, ninst, x1, x2, 0, X87_ST0);
                 if (!BOX64ENV(dynarec_fastround)) u8 = x87_setround(dyn, ninst, x1, x2);
-                if (ST_IS_F(0)) {
+                if (!BOX64ENV(dynarec_fastnan)) {
+                    q0 = fpu_get_scratch(dyn);
+                    q1 = fpu_get_scratch(dyn);
+                    if (ST_IS_F(0)) {
+                        VFCMP_S(q0, v1, VZERO, cLT);
+                        FSQRT_S(v1, v1);
+                        MOV32w(x3, X87_REAL_INDEFINITE_FLOAT);
+                        MOVGR2FR_W(q1, x3);
+                    } else {
+                        VFCMP_D(q0, v1, VZERO, cLT);
+                        FSQRT_D(v1, v1);
+                        MOV64x(x3, X87_REAL_INDEFINITE_DOUBLE);
+                        MOVGR2FR_D(q1, x3);
+                    }
+                    VBITSEL_V(v1, v1, q1, q0);
+                } else if (ST_IS_F(0)) {
                     FSQRT_S(v1, v1);
                 } else {
                     FSQRT_D(v1, v1);
