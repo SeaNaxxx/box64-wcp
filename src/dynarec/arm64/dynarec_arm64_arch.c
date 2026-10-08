@@ -121,11 +121,11 @@ static int arch_build(dynarec_arm_t* dyn, int ninst, arch_build_t* arch, int noa
                             arch->ymm = 1;
                             arch->ymm_.ymm |= 1<<dyn->insts[ninst].n.neoncache[i].n;
                             idx = i;
-                            if(idx>=EMM0 && idx<=EMM0+8)
+                            if(idx>=EMM0 && idx<EMM0+8)
                                 idx-=EMM0;
                             else
                                 idx-=SCRATCH0-8;
-                            arch->ymm_.ymm_pos |= idx<<(dyn->insts[ninst].n.neoncache[i].n*4);
+                            arch->ymm_.ymm_pos |= (uint64_t)idx<<(dyn->insts[ninst].n.neoncache[i].n*4);
                             break;
                         case NEON_CACHE_ST_D:
                             arch->x87 = 1;
@@ -377,7 +377,7 @@ void adjust_arch(dynablock_t* db, x64emu_t* emu, ucontext_t* p, uintptr_t x64pc)
     }
     if(x87) {
         dynarec_log_prefix(0, LOG_INFO, " x87[%x, pos=%x, type=%x (fpsimd=%p)] ", x87->x87, x87->x87_pos, x87->x87_type, fpsimd);
-        emu->top -= x87->delta;
+        if (x87->delta) emu->top = (emu->top - x87->delta) & 7;
         for(int i=0; i<8; ++i) {
             if(x87->x87&(1<<i)) {
                 int idx = EMM0 + ((x87->x87_pos>>(i*4))&0x0f);

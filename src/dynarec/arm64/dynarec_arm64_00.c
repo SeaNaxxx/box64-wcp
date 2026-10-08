@@ -2162,6 +2162,7 @@ uintptr_t dynarec64_00(dynarec_arm_t* dyn, uintptr_t addr, uintptr_t ip, int nin
                 CBNZx_MARK2(xRCX);
                 MARK3;  // end
                 emit_cmp8(dyn, ninst, x1, x2, x3, x4, x5);
+                STOP_NATIVE_FLAGS(dyn, ninst);
                 break;
             default:
                 INST_NAME("CMPSB");
@@ -2214,6 +2215,7 @@ uintptr_t dynarec64_00(dynarec_arm_t* dyn, uintptr_t addr, uintptr_t ip, int nin
                 CBNZx_MARK2(xRCX);
                 MARK3;  // end
                 emit_cmp32(dyn, ninst, rex, x1, x2, x3, x4, x5);
+                STOP_NATIVE_FLAGS(dyn, ninst);
                 break;
             default:
                 INST_NAME("CMPSD");
@@ -2412,6 +2414,7 @@ uintptr_t dynarec64_00(dynarec_arm_t* dyn, uintptr_t addr, uintptr_t ip, int nin
                 CBNZx_MARK2(xRCX);
                 MARK3;  // end
                 emit_cmp8(dyn, ninst, x1, x2, x3, x4, x5);
+                STOP_NATIVE_FLAGS(dyn, ninst);
                 break;
             default:
                 INST_NAME("SCASB");
@@ -2458,6 +2461,7 @@ uintptr_t dynarec64_00(dynarec_arm_t* dyn, uintptr_t addr, uintptr_t ip, int nin
                 CBNZx_MARK2(xRCX);
                 MARK3;  // end
                 emit_cmp32(dyn, ninst, rex, xRAX, x2, x3, x4, x5);
+                STOP_NATIVE_FLAGS(dyn, ninst);
                 break;
             default:
                 INST_NAME("SCASD");
@@ -2955,6 +2959,8 @@ uintptr_t dynarec64_00(dynarec_arm_t* dyn, uintptr_t addr, uintptr_t ip, int nin
             READFLAGS(X_PEND);
             BARRIER(BARRIER_FLOAT);
             if(rex.w) {POP2(xRIP, x3);} else {POP2_32(xRIP, x3);}
+            TBZ_MARK(x3, 0);
+            TBZ_MARK(x3, 1);    //GP if CS is incorect
             STRH_U12(x3, xEmu, offsetof(x64emu_t, segs[_CS]));
             if(u16<0x1000)
                 ADDz_U12(xRSP, xRSP, u16);
@@ -2963,6 +2969,11 @@ uintptr_t dynarec64_00(dynarec_arm_t* dyn, uintptr_t addr, uintptr_t ip, int nin
                 ADDz_REG(xRSP, xRSP, x1);
             }
             ret_to_next(dyn, ip, ninst, rex);
+            MARK;
+            ADDx_U12(xRSP, xRSP, (rex.w?8:4)*2);
+            MOV64x(xRIP, ip);   // move back RIP to the opcode
+            CALL_S(const_native_priv, -1);
+            jump_to_epilog(dyn, 0, xRIP, ninst);
             *need_epilog = 0;
             *ok = 0;
             break;
@@ -2971,8 +2982,15 @@ uintptr_t dynarec64_00(dynarec_arm_t* dyn, uintptr_t addr, uintptr_t ip, int nin
             READFLAGS(X_PEND);
             BARRIER(BARRIER_FLOAT);
             if(rex.w) {POP2(xRIP, x3);} else {POP2_32(xRIP, x3);}
+            TBZ_MARK(x3, 0);
+            TBZ_MARK(x3, 1);    //GP if CS is incorect
             STRH_U12(x3, xEmu, offsetof(x64emu_t, segs[_CS]));
             ret_to_next(dyn, ip, ninst, rex);
+            MARK;
+            ADDx_U12(xRSP, xRSP, (rex.w?8:4)*2);
+            MOV64x(xRIP, ip);   // move back RIP to the opcode
+            CALL_S(const_native_priv, -1);
+            jump_to_epilog(dyn, 0, xRIP, ninst);
             *need_epilog = 0;
             *ok = 0;
             break;
@@ -4653,6 +4671,12 @@ uintptr_t dynarec64_00(dynarec_arm_t* dyn, uintptr_t addr, uintptr_t ip, int nin
                         LDxw(x1, wback, 0);
                         ed = x1;
                         LDH(x3, wback, rex.w?8:4);
+                        TBZ(x3, 0, 4+4);
+                        TBNZ_MARK2(x3, 1);
+                        // Bad CS => GP
+                        CALL_S(const_native_priv, -1);
+                        jump_to_epilog(dyn, 0, xRIP, ninst);
+                        MARK2;
                         LDH(x5, xEmu, offsetof(x64emu_t, segs[_CS]));
                         if (BOX64DRENV(dynarec_callret) && BOX64DRENV(dynarec_bigblock) > 1) {
                             BARRIER(BARRIER_FULL);
