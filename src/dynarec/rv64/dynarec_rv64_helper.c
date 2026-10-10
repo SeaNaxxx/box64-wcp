@@ -56,6 +56,8 @@ uintptr_t geted(dynarec_rv64_t* dyn, uintptr_t addr, int ninst, uint8_t nextop, 
             uint8_t sib = F8;
             int sib_reg = ((sib >> 3) & 7) + (rex.x << 3);
             int sib_reg2 = (sib & 0x7) + (rex.b << 3);
+            if ((sib & 0x7) != 5) UP32_READ(TO_NAT(sib_reg2));
+            if (sib_reg != 4) UP32_READ(TO_NAT(sib_reg));
             if ((sib & 0x7) == 5) {
                 int64_t tmp = F32S;
                 if (sib_reg != 4) {
@@ -173,6 +175,7 @@ uintptr_t geted(dynarec_rv64_t* dyn, uintptr_t addr, int ninst, uint8_t nextop, 
                 if (!IS_GPR(ret)) SCRATCH_USAGE(1);
             }
         } else {
+            UP32_READ(TO_NAT((nextop & 7) + (rex.b << 3)));
             ret = TO_NAT((nextop & 7) + (rex.b << 3));
         }
     } else {
@@ -182,6 +185,8 @@ uintptr_t geted(dynarec_rv64_t* dyn, uintptr_t addr, int ninst, uint8_t nextop, 
         if ((nextop & 7) == 4) {
             sib = F8;
             sib_reg = ((sib >> 3) & 7) + (rex.x << 3);
+            UP32_READ(TO_NAT((sib & 0x07) + (rex.b << 3)));
+            if (sib_reg != 4) UP32_READ(TO_NAT(sib_reg));
         }
         int sib_reg2 = (sib & 0x07) + (rex.b << 3);
         if (nextop & 0x80)
@@ -210,8 +215,10 @@ uintptr_t geted(dynarec_rv64_t* dyn, uintptr_t addr, int ninst, uint8_t nextop, 
                 } else {
                     ret = TO_NAT(sib_reg2);
                 }
-            } else
+            } else {
+                UP32_READ(TO_NAT((nextop & 0x07) + (rex.b << 3)));
                 ret = TO_NAT((nextop & 0x07) + (rex.b << 3));
+            }
         } else {
             if (i64 >= -2048 && i64 <= 2047) {
                 if ((nextop & 7) == 4) {
@@ -236,6 +243,7 @@ uintptr_t geted(dynarec_rv64_t* dyn, uintptr_t addr, int ninst, uint8_t nextop, 
                         if (!IS_GPR(ret)) SCRATCH_USAGE(1);
                     }
                 } else {
+                    UP32_READ(TO_NAT((nextop & 0x07) + (rex.b << 3)));
                     ADDIy(ret, TO_NAT((nextop & 0x07) + (rex.b << 3)), i64);
                     if (!IS_GPR(ret)) SCRATCH_USAGE(1);
                 }
@@ -251,6 +259,7 @@ uintptr_t geted(dynarec_rv64_t* dyn, uintptr_t addr, int ninst, uint8_t nextop, 
                         ADDy(ret, tmp, scratch);
                     }
                 } else {
+                    UP32_READ(TO_NAT((nextop & 0x07) + (rex.b << 3)));
                     PASS3(int tmp = TO_NAT((nextop & 0x07) + (rex.b << 3)));
                     ADDy(ret, tmp, scratch);
                 }
@@ -605,6 +614,7 @@ void call_c(dynarec_rv64_t* dyn, int ninst, rv64_consts_t fnc, int reg, int ret,
 {
     MAYUSE(fnc);
     CHECK_DFNONE(1);
+    UP32_READALL();
     if (savereg == 0)
         savereg = x87pc;
     if (saveflags) {
@@ -672,6 +682,7 @@ void call_n(dynarec_rv64_t* dyn, int ninst, void* fnc, int w)
 {
     MAYUSE(fnc);
     CHECK_DFNONE(1);
+    UP32_READALL();
     fpu_pushcache(dyn, ninst, x3, 1);
     // save RSP in case there are x86 callbacks...
     SD(xRSP, xEmu, offsetof(x64emu_t, regs[_SP]));
@@ -942,12 +953,7 @@ void x87_purgecache(dynarec_rv64_t* dyn, int ninst, int next, int s1, int s2, in
 #endif
                 ADDI(s3, s2, dyn->e.x87cache[i]); // unadjusted count, as it's relative to real top
                 ANDI(s3, s3, 7);                  // (emu->top + st)&7
-                if (cpuext.zba)
-                    SH3ADD(s1, s3, xEmu);
-                else {
-                    SLLI(s1, s3, 3);
-                    ADD(s1, xEmu, s1);
-                }
+                ADDSL(s1, xEmu, s3, 3, s1);
                 switch (extcache_get_current_st(dyn, ninst, st)) {
                     case EXT_CACHE_ST_D:
                         FSD(dyn->e.x87reg[i], s1, offsetof(x64emu_t, x87)); // save the value
@@ -1054,12 +1060,7 @@ static void x87_reflectcache(dynarec_rv64_t* dyn, int ninst, int s1, int s2, int
         if (dyn->e.x87cache[i] != -1) {
             ADDI(s3, s2, dyn->e.x87cache[i]);
             ANDI(s3, s3, 7); // (emu->top + i)&7
-            if (cpuext.zba)
-                SH3ADD(s1, s3, xEmu);
-            else {
-                SLLI(s1, s3, 3);
-                ADD(s1, xEmu, s1);
-            }
+            ADDSL(s1, xEmu, s3, 3, s1);
             if (extcache_get_current_st_f(dyn, dyn->e.x87cache[i]) >= 0) {
                 FCVTDS(SCRATCH0, dyn->e.x87reg[i]);
                 FSD(SCRATCH0, s1, offsetof(x64emu_t, x87));
@@ -1136,12 +1137,7 @@ int x87_get_cache(dynarec_rv64_t* dyn, int ninst, int populate, int s1, int s2, 
             ADDI(s2, s2, a);
             ANDI(s2, s2, 7);
         }
-        if (cpuext.zba)
-            SH3ADD(s1, s2, xEmu);
-        else {
-            SLLI(s2, s2, 3);
-            ADD(s1, xEmu, s2);
-        }
+        ADDSL(s1, xEmu, s2, 3, s2);
         FLD(dyn->e.x87reg[ret], s1, offsetof(x64emu_t, x87));
     }
     MESSAGE(LOG_DUMP, "\t-------x87 Cache for ST%d\n", st);
@@ -1188,12 +1184,7 @@ void x87_refresh(dynarec_rv64_t* dyn, int ninst, int s1, int s2, int st)
         ADDI(s2, s2, a);
         ANDI(s2, s2, 7); // (emu->top + i)&7
     }
-    if (cpuext.zba)
-        SH3ADD(s1, s2, xEmu);
-    else {
-        SLLI(s2, s2, 3);
-        ADD(s1, xEmu, s2);
-    }
+    ADDSL(s1, xEmu, s2, 3, s2);
     if (dyn->e.extcache[EXTIDX(reg)].t == EXT_CACHE_ST_F) {
         FCVTDS(SCRATCH0, reg);
         FSD(SCRATCH0, s1, offsetof(x64emu_t, x87));
@@ -1231,12 +1222,7 @@ void x87_forget(dynarec_rv64_t* dyn, int ninst, int s1, int s2, int st)
         ADDI(s2, s2, a);
         ANDI(s2, s2, 7); // (emu->top + i)&7
     }
-    if (cpuext.zba)
-        SH3ADD(s1, s2, xEmu);
-    else {
-        SLLI(s2, s2, 3);
-        ADD(s1, xEmu, s2);
-    }
+    ADDSL(s1, xEmu, s2, 3, s2);
     if (dyn->e.extcache[EXTIDX(reg)].t == EXT_CACHE_ST_F) {
         FCVTDS(SCRATCH0, reg);
         FSD(SCRATCH0, s1, offsetof(x64emu_t, x87));
@@ -1275,12 +1261,7 @@ void x87_reget_st(dynarec_rv64_t* dyn, int ninst, int s1, int s2, int st)
                 ADDI(s2, s2, a);
                 AND(s2, s2, 7);
             }
-            if (cpuext.zba)
-                SH3ADD(s1, s2, xEmu);
-            else {
-                SLLI(s2, s2, 3);
-                ADD(s1, xEmu, s2);
-            }
+            ADDSL(s1, xEmu, s2, 3, s2);
             FLD(dyn->e.x87reg[i], s1, offsetof(x64emu_t, x87));
             MESSAGE(LOG_DUMP, "\t-------x87 Cache for ST%d\n", st);
             // ok
@@ -1300,12 +1281,7 @@ void x87_reget_st(dynarec_rv64_t* dyn, int ninst, int s1, int s2, int st)
     int a = st - dyn->e.x87stack;
     ADDI(s2, s2, a);
     ANDI(s2, s2, 7); // (emu->top + i)&7
-    if (cpuext.zba)
-        SH3ADD(s1, s2, xEmu);
-    else {
-        SLLI(s2, s2, 3);
-        ADD(s1, xEmu, s2);
-    }
+    ADDSL(s1, xEmu, s2, 3, s2);
     FLD(dyn->e.x87reg[ret], s1, offsetof(x64emu_t, x87));
     MESSAGE(LOG_DUMP, "\t-------x87 Cache for ST%d\n", st);
 }
@@ -1335,12 +1311,7 @@ void x87_free(dynarec_rv64_t* dyn, int ninst, int s1, int s2, int s3, int st)
             }
             ANDI(s2, s2, 7); // (emu->top + i)&7
         }
-        if (cpuext.zba)
-            SH3ADD(s1, s2, xEmu);
-        else {
-            SLLI(s2, s2, 3);
-            ADD(s1, xEmu, s2);
-        }
+        ADDSL(s1, xEmu, s2, 3, s2);
         if (dyn->e.extcache[EXTIDX(reg)].t == EXT_CACHE_ST_F) {
             FCVTDS(SCRATCH0, reg);
             FSD(SCRATCH0, s1, offsetof(x64emu_t, x87));
@@ -2356,12 +2327,7 @@ static void loadCache(dynarec_rv64_t* dyn, int ninst, int stack_cnt, int s1, int
             }
             *s3_top += a;
             *s2_val = 0;
-            if (cpuext.zba)
-                SH3ADD(s2, s3, xEmu);
-            else {
-                SLLI(s2, s3, 3);
-                ADD(s2, xEmu, s2);
-            }
+            ADDSL(s2, xEmu, s3, 3, s2);
             FLD(reg, s2, offsetof(x64emu_t, x87));
             if (t == EXT_CACHE_ST_F) {
                 FCVTSD(reg, reg);
@@ -2433,12 +2399,7 @@ static void unloadCache(dynarec_rv64_t* dyn, int ninst, int stack_cnt, int s1, i
                 ANDI(s3, s3, 7);
             }
             *s3_top += a;
-            if (cpuext.zba)
-                SH3ADD(s2, s3, xEmu);
-            else {
-                SLLI(s2, s3, 3);
-                ADD(s2, xEmu, s2);
-            }
+            ADDSL(s2, xEmu, s3, 3, s2);
             *s2_val = 0;
             if (t == EXT_CACHE_ST_F) {
                 FCVTDS(reg, reg);

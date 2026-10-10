@@ -585,8 +585,7 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
             for (int i = 0; i < 4; ++i) {
                 LWU(x4, xEmu, offsetof(x64emu_t, scratch) + 16 + 4 * i);
                 ANDI(x4, x4, 3);
-                SLLI(x4, x4, 2);
-                ADD(x4, x4, xEmu);
+                ADDSL(x4, xEmu, x4, 2, x4);
                 LWU(x5, x4, offsetof(x64emu_t, scratch) + 0);
                 SW(x5, gback, gdoffset + 4 * i);
             }
@@ -604,8 +603,7 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
                 for (int i = 0; i < 4; ++i) {
                     LWU(x4, xEmu, offsetof(x64emu_t, scratch) + 16 + 4 * i);
                     ANDI(x4, x4, 3);
-                    SLLI(x4, x4, 2);
-                    ADD(x4, x4, xEmu);
+                    ADDSL(x4, xEmu, x4, 2, x4);
                     LWU(x5, x4, offsetof(x64emu_t, scratch) + 0);
                     SW(x5, gback, gyoffset + 4 * i);
                 }
@@ -631,8 +629,7 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
                 LD(x4, xEmu, offsetof(x64emu_t, scratch) + 16 + 8 * i);
                 SRLI(x4, x4, 1);
                 ANDI(x4, x4, 1);
-                SLLI(x4, x4, 3);
-                ADD(x4, x4, xEmu);
+                ADDSL(x4, xEmu, x4, 3, x4);
                 LD(x5, x4, offsetof(x64emu_t, scratch) + 0);
                 SD(x5, gback, gdoffset + 8 * i);
             }
@@ -651,8 +648,7 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
                     LD(x4, xEmu, offsetof(x64emu_t, scratch) + 16 + 8 * i);
                     SRLI(x4, x4, 1);
                     ANDI(x4, x4, 1);
-                    SLLI(x4, x4, 3);
-                    ADD(x4, x4, xEmu);
+                    ADDSL(x4, xEmu, x4, 3, x4);
                     LD(x5, x4, offsetof(x64emu_t, scratch) + 0);
                     SD(x5, gback, gyoffset + 8 * i);
                 }
@@ -727,16 +723,14 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
             for (int i = 0; i < 4; ++i) {
                 LWU(x3, vback, vxoffset + 4 * i);
                 ANDI(x3, x3, 7);
-                SLLI(x3, x3, 2);
-                ADD(x4, wback, x3);
+                ADDSL(x4, wback, x3, 2, x3);
                 LWU(x5, x4, fixedaddress);
                 SW(x5, gback, gdoffset + 4 * i);
             }
             for (int i = 0; i < 4; ++i) {
                 LWU(x3, vback, vyoffset + 4 * i);
                 ANDI(x3, x3, 7);
-                SLLI(x3, x3, 2);
-                ADD(x4, wback, x3);
+                ADDSL(x4, wback, x3, 2, x3);
                 LWU(x5, x4, fixedaddress);
                 SW(x5, gback, gyoffset + 4 * i);
             }
@@ -1474,16 +1468,14 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
             for (int i = 0; i < 4; ++i) {
                 LWU(x3, vback, vxoffset + 4 * i);
                 ANDI(x3, x3, 7);
-                SLLI(x3, x3, 2);
-                ADD(x4, wback, x3);
+                ADDSL(x4, wback, x3, 2, x3);
                 LWU(x5, x4, fixedaddress);
                 SW(x5, gback, gdoffset + 4 * i);
             }
             for (int i = 0; i < 4; ++i) {
                 LWU(x3, vback, vyoffset + 4 * i);
                 ANDI(x3, x3, 7);
-                SLLI(x3, x3, 2);
-                ADD(x4, wback, x3);
+                ADDSL(x4, wback, x3, 2, x3);
                 LWU(x5, x4, fixedaddress);
                 SW(x5, gback, gyoffset + 4 * i);
             }
@@ -1826,7 +1818,7 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
             nextop = F8;
             GETEX(x2, 0, 14);
             GETGX();
-            ADDI(x6, xZR, 0xffff);
+            MOV32w(x6, 0xffff);
             ADDI(x7, xZR, 0);
             for (int i = 0; i < 8; ++i) {
                 LHU(x3, wback, fixedaddress + 2 * i);
@@ -2524,7 +2516,7 @@ uintptr_t dynarec64_AVX_66_0F38(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
         case 0xF7:
             INST_NAME("SHLX Gd, Ed, Vd");
             nextop = F8;
-            GETGD;
+            GETGDd;
             GETED(0);
             GETVD;
             ANDI(x5, vd, rex.w ? 0x3f : 0x1f);

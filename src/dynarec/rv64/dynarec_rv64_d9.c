@@ -142,12 +142,7 @@ uintptr_t dynarec64_D9(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
                             ANDI(x5, x5, 7); // (emu->top + i)&7
                         }
                         // load x2 with ST0 anyway, for sign extraction
-                        if (cpuext.zba)
-                            SH3ADD(x1, x5, xEmu);
-                        else {
-                            SLLI(x5, x5, 3);
-                            ADD(x1, xEmu, x5);
-                        }
+                        ADDSL(x1, xEmu, x5, 3, x5);
                         LD(x2, x1, offsetof(x64emu_t, x87));
                         // load tag
                         if (i2 >= 0) {
@@ -325,7 +320,7 @@ uintptr_t dynarec64_D9(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
             break;
         case 0xF6:
             INST_NAME("FDECSTP");
-            fpu_purgecache(dyn, ninst, 0, x1, x2, x3);
+            BARRIER(BARRIER_FLOAT);
             LW(x2, xEmu, offsetof(x64emu_t, top));
             SUBI(x2, x2, 1);
             ANDI(x2, x2, 7);
@@ -333,7 +328,7 @@ uintptr_t dynarec64_D9(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
             break;
         case 0xF7:
             INST_NAME("FINCSTP");
-            fpu_purgecache(dyn, ninst, 0, x1, x2, x3);
+            BARRIER(BARRIER_FLOAT);
             LW(x2, xEmu, offsetof(x64emu_t, top));
             ADDI(x2, x2, 1);
             ANDI(x2, x2, 7);
@@ -521,12 +516,7 @@ uintptr_t dynarec64_D9(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
                     if (!BOX64ENV(dynarec_fastnan)) {
                         FEQS(x5, s0, s0);
                         BNEZ_MARK(x5);
-                        FMVXD(x5, v1);
-                        SRLI(x5, x5, 63);
-                        BNEZ_MARK2(x5);
-                        B_MARK_nocond;
-                        MARK2;
-                        FNEGS(s0, s0);
+                        X87_DOUBLE_TO_FLOAT(s0, v1, x5, x6);
                         MARK;
                     }
                 }
@@ -548,12 +538,7 @@ uintptr_t dynarec64_D9(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
                     if (!BOX64ENV(dynarec_fastnan)) {
                         FEQS(x5, v1, v1);
                         BNEZ_MARK(x5);
-                        FMVXD(x5, s1);
-                        SRLI(x5, x5, 63);
-                        BNEZ_MARK2(x5);
-                        B_MARK_nocond;
-                        MARK2;
-                        FNEGS(v1, v1);
+                        X87_DOUBLE_TO_FLOAT(v1, s1, x5, x6);
                         MARK;
                     }
                 }
@@ -563,7 +548,7 @@ uintptr_t dynarec64_D9(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
             case 4:
                 INST_NAME("FLDENV Ed");
                 MESSAGE(LOG_DUMP, "Need Optimization\n");
-                fpu_purgecache(dyn, ninst, 0, x1, x2, x3); // maybe only x87, not SSE?
+                BARRIER(BARRIER_FLOAT); // maybe only x87, not SSE?
                 addr = geted(dyn, addr, ninst, nextop, &ed, x1, x2, &fixedaddress, rex, NULL, 0, 0);
                 MOV32w(x2, 0);
                 CALL(const_fpu_loadenv, -1, ed, x2);
@@ -581,7 +566,7 @@ uintptr_t dynarec64_D9(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip, int ni
             case 6:
                 INST_NAME("FNSTENV Ed");
                 MESSAGE(LOG_DUMP, "Need Optimization\n");
-                fpu_purgecache(dyn, ninst, 0, x1, x2, x3); // maybe only x87, not SSE?
+                BARRIER(BARRIER_FLOAT); // maybe only x87, not SSE?
                 addr = geted(dyn, addr, ninst, nextop, &ed, x1, x2, &fixedaddress, rex, NULL, 0, 0);
                 MOV32w(x2, 0);
                 CALL(const_fpu_savenv, -1, ed, x2);

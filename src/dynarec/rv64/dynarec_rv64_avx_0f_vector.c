@@ -214,7 +214,7 @@ uintptr_t dynarec64_AVX_0F_vector(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t
             INST_NAME("VMOVMSKPS Gd, Ex");
             nextop = F8;
             GETEY_vector(q0, 0, VECTOR_SEW32);
-            GETGD;
+            GETGDd;
             VMSLT_VX(VMASK, q0, xZR, VECTOR_UNMASKED);
             VMV_X_S(gd, VMASK);
             ANDI(gd, gd, vex.l ? 0xff : 0x0f);
@@ -390,7 +390,7 @@ uintptr_t dynarec64_AVX_0F_vector(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t
                 UDF();
                 break;
             }
-            fpu_purgecache(dyn, ninst, 0, x1, x2, x3);
+            BARRIER(BARRIER_FLOAT);
             if (vex.l) {
                 INST_NAME("VZEROALL");
                 for (int i = 0; i < (rex.is32bits ? 8 : 16); ++i) {
