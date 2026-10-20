@@ -598,38 +598,15 @@
 
 #define GETVY_vector(a, sew)                                             \
     do {                                                                 \
-        a = fpu_get_scratch(dyn);                                        \
+        a = VREG(vex.v);                                                 \
         avx_load_reg_vector(dyn, ninst, x1, a, vex.v, 16 << vex.l, sew); \
     } while (0)
 
 #define GETGY_vector(a, sew)                                          \
     do {                                                              \
         gd = ((nextop & 0x38) >> 3) + (rex.r << 3);                   \
-        a = fpu_get_scratch(dyn);                                     \
+        a = VREG(gd);                                                 \
         avx_load_reg_vector(dyn, ninst, x1, a, gd, 16 << vex.l, sew); \
-    } while (0)
-
-#define GETVY_vector_cached(a, sew)                                          \
-    do {                                                                     \
-        if (vex.l) {                                                         \
-            a = fpu_get_scratch(dyn);                                        \
-            avx_load_reg_vector(dyn, ninst, x1, a, vex.v, 16 << vex.l, sew); \
-        } else {                                                             \
-            avx_set_vector_width(dyn, ninst, x1, sew, 16);                   \
-            a = sse_get_reg_vector(dyn, ninst, x1, vex.v, 0, sew);           \
-        }                                                                    \
-    } while (0)
-
-#define GETGY_vector_cached(a, sew)                                       \
-    do {                                                                  \
-        gd = ((nextop & 0x38) >> 3) + (rex.r << 3);                       \
-        if (vex.l) {                                                      \
-            a = fpu_get_scratch(dyn);                                     \
-            avx_load_reg_vector(dyn, ninst, x1, a, gd, 16 << vex.l, sew); \
-        } else {                                                          \
-            avx_set_vector_width(dyn, ninst, x1, sew, 16);                \
-            a = sse_get_reg_vector(dyn, ninst, x1, gd, 0, sew);           \
-        }                                                                 \
     } while (0)
 
 #define GETGY_empty_vector(a)                             \
@@ -640,11 +617,12 @@
 
 #define GETEY_vector(a, D, sew)                                                                  \
     do {                                                                                         \
-        a = fpu_get_scratch(dyn);                                                                \
         if (MODREG) {                                                                            \
+            a = VREG((nextop & 7) + (rex.b << 3));                                               \
             avx_load_reg_vector(dyn, ninst, x1, a, (nextop & 7) + (rex.b << 3),                  \
                 16 << vex.l, sew);                                                               \
         } else {                                                                                 \
+            a = fpu_get_scratch(dyn);                                                            \
             SMREAD();                                                                            \
             addr = geted(dyn, addr, ninst, nextop, &ed, x3, x2, &fixedaddress, rex, NULL, 0, D); \
             SET_AVX_VECTOR_WIDTH(x1, sew);                                                       \
@@ -655,10 +633,11 @@
 // Get EY as a 128bits vector, even if vex.l is set
 #define GETEY128_vector(a, D, sew)                                                               \
     do {                                                                                         \
-        a = fpu_get_scratch(dyn);                                                                \
         if (MODREG) {                                                                            \
-            avx_load_reg_vector(dyn, ninst, x1, a, (nextop & 7) + (rex.b << 3), 16, sew);         \
+            a = VREG((nextop & 7) + (rex.b << 3));                                               \
+            avx_load_reg_vector(dyn, ninst, x1, a, (nextop & 7) + (rex.b << 3), 16, sew);        \
         } else {                                                                                 \
+            a = fpu_get_scratch(dyn);                                                            \
             SMREAD();                                                                            \
             addr = geted(dyn, addr, ninst, nextop, &ed, x3, x2, &fixedaddress, rex, NULL, 0, D); \
             avx_set_vector_width(dyn, ninst, x1, sew, 16);                                       \
@@ -667,13 +646,52 @@
         SET_AVX_VECTOR_WIDTH(x1, sew);                                                           \
     } while (0)
 
+#define VEC_SRC_KEEP(a, dst)                  \
+    do {                                      \
+        if ((a) == (dst)) {                   \
+            int keep_ = fpu_get_scratch(dyn); \
+            VMV_V_V(keep_, (a));              \
+            (a) = keep_;                      \
+        }                                     \
+    } while (0)
+
+#define GETGY_empty_VYEY_vector_D(gx, vx, ex, sew, D) \
+    do {                                              \
+        GETVY_vector(vx, sew);                        \
+        GETEY_vector(ex, D, sew);                     \
+        GETGY_empty_vector(gx);                       \
+    } while (0)
+
+#define GETGY_empty_VYEY_vector(gx, vx, ex, sew) \
+    GETGY_empty_VYEY_vector_D(gx, vx, ex, sew, 0)
+
+#define GETGY_empty_VYEY_vector_safe(gx, vx, ex, sew) \
+    do {                                              \
+        GETVY_vector(vx, sew);                        \
+        GETEY_vector(ex, 0, sew);                     \
+        GETGY_empty_vector(gx);                       \
+        VEC_SRC_KEEP(vx, gx);                         \
+        VEC_SRC_KEEP(ex, gx);                         \
+    } while (0)
+
+#define VEC_SRC_SAFE(a, dst)                                                \
+    do {                                                                    \
+        if ((a) == (dst)) {                                                 \
+            int safe_ = fpu_get_scratch(dyn);                               \
+            avx_set_vector_width(dyn, ninst, x1, VECTOR_SEW8, 16 << vex.l); \
+            VMV_V_V(safe_, (a));                                            \
+            (a) = safe_;                                                    \
+        }                                                                   \
+    } while (0)
+
 // Get EY as a vector of w bytes (for instructions whose source operand is narrower than the destination)
 #define GETEY_vector_w(a, D, sew, w)                                                             \
     do {                                                                                         \
-        a = fpu_get_scratch(dyn);                                                                \
         if (MODREG) {                                                                            \
+            a = VREG((nextop & 7) + (rex.b << 3));                                               \
             avx_load_reg_vector(dyn, ninst, x1, a, (nextop & 7) + (rex.b << 3), w, sew);         \
         } else {                                                                                 \
+            a = fpu_get_scratch(dyn);                                                            \
             SMREAD();                                                                            \
             addr = geted(dyn, addr, ninst, nextop, &ed, x3, x2, &fixedaddress, rex, NULL, 0, D); \
             avx_set_vector_width(dyn, ninst, x1, sew, w);                                        \
@@ -1617,19 +1635,58 @@
 #define MODREG ((nextop & 0xC0) == 0xC0)
 
 #ifndef SET_ELEMENT_WIDTH
-#define SET_ELEMENT_WIDTH(s1, sew, set)                                               \
-    do {                                                                              \
-        if ((sew) == VECTOR_SEWANY && dyn->vector_sew != VECTOR_SEWNA) {              \
-            dyn->vector_eew = dyn->vector_sew;                                        \
-        } else if ((sew) == dyn->vector_sew && (unsigned)(sew) < 4 &&                 \
-                   dyn->inst_vl == (uint32_t)(16u >> (sew))) {                        \
-            dyn->vector_eew = dyn->vector_sew;                                        \
-        } else {                                                                      \
-            dyn->vector_eew = vector_vsetvli(dyn, ninst, s1, (sew), VECTOR_LMUL1, 1); \
-        }                                                                             \
-        if (set) dyn->vector_sew = dyn->vector_eew;                                   \
+#define SET_ELEMENT_WIDTH(s1, sew, set)                                                                           \
+    do {                                                                                                          \
+        if ((sew) == VECTOR_SEWANY && (unsigned)dyn->vector_sew < 4                                               \
+            && dyn->inst_vl == (uint32_t)(16u >> dyn->vector_sew)) {                                              \
+            dyn->vector_eew = dyn->vector_sew;                                                                    \
+        } else if ((sew) == dyn->vector_sew && (unsigned)(sew) < 4 && dyn->inst_vl == (uint32_t)(16u >> (sew))) { \
+            dyn->vector_eew = dyn->vector_sew;                                                                    \
+        } else {                                                                                                  \
+            dyn->vector_eew = vector_vsetvli(dyn, ninst, s1, (sew), VECTOR_LMUL1, 1);                             \
+        }                                                                                                         \
+        if (set) dyn->vector_sew = dyn->vector_eew;                                                               \
     } while (0)
 #endif
+
+#define SET_SCALAR_FP_WIDTH(s1, sew)                                          \
+    do {                                                                      \
+        dyn->vector_eew = vector_vsetvli(dyn, ninst, s1, (sew), VECTOR_LMUL1, \
+            1.0f / (float)(16 >> (sew)));                                     \
+        dyn->vector_sew = dyn->vector_eew;                                    \
+    } while (0)
+
+#define AVX_SCALAR_OP_PROLOG(SEW)                                                                \
+    do {                                                                                         \
+        q0 = VREG(vex.v);                                                                        \
+        avx_load_reg_vector(dyn, ninst, x1, q0, vex.v, 16, (SEW));                               \
+        if (MODREG) {                                                                            \
+            ed = (nextop & 7) + (rex.b << 3);                                                    \
+            q1 = VREG(ed);                                                                       \
+            avx_load_reg_vector(dyn, ninst, x1, q1, ed, 16, (SEW));                              \
+        } else {                                                                                 \
+            q1 = fpu_get_scratch(dyn);                                                           \
+            SMREAD();                                                                            \
+            addr = geted(dyn, addr, ninst, nextop, &ed, x2, x3, &fixedaddress, rex, NULL, 0, 0); \
+            avx_set_vector_width(dyn, ninst, x1, (SEW), 1 << (SEW));                             \
+            VLE_V(q1, ed, (SEW), VECTOR_UNMASKED, VECTOR_NFIELD1);                               \
+        }                                                                                        \
+        GETGY_empty_vector(v0);                                                                  \
+        if (v0 != q0) {                                                                          \
+            if (v0 == q1) {                                                                      \
+                int _t = fpu_get_scratch(dyn);                                                   \
+                avx_set_vector_width(dyn, ninst, x1, (SEW), 16);                                 \
+                VMV_V_V(_t, q1);                                                                 \
+                q1 = _t;                                                                         \
+            }                                                                                    \
+            avx_set_vector_width(dyn, ninst, x1, (SEW), 16);                                     \
+            VMV_V_V(v0, q0);                                                                     \
+        }                                                                                        \
+        SET_SCALAR_FP_WIDTH(x1, (SEW));                                                          \
+    } while (0)
+
+#define AVX_SCALAR_OP_STORE(SEW) \
+    avx_store_reg_vector(dyn, ninst, x1, v0, gd, 16, (SEW))
 
 #define SET_CACHE_VECTOR_WIDTH(S1)                                                \
     do {                                                                          \
@@ -1863,6 +1920,7 @@
 #define avx_store_reg_vector     STEPNAME(avx_store_reg_vector)
 #define avx_flush_upper_vector        STEPNAME(avx_flush_upper_vector)
 #define avx_sync_upper_vector         STEPNAME(avx_sync_upper_vector)
+#define doPreload                     STEPNAME(doPreload)
 #define avx_flush_pending_zero_vector STEPNAME(avx_flush_pending_zero_vector)
 
 #define fpu_pushcache       STEPNAME(fpu_pushcache)
@@ -2128,12 +2186,20 @@ void sse_purge07cache(dynarec_rv64_t* dyn, int ninst, int s1);
 // Push current value to the cache
 void sse_reflect_reg(dynarec_rv64_t* dyn, int ninst, int s1, int a);
 
-void avx_flush_upper_vector(dynarec_rv64_t* dyn, int ninst, int s1, int a, int reg, int next);
+void avx_flush_upper_vector(dynarec_rv64_t* dyn, int ninst, int s1, int a, int reg, int next, int dead);
 void avx_sync_upper_vector(dynarec_rv64_t* dyn, int ninst, int s1, int next);
 void avx_flush_pending_zero_vector(dynarec_rv64_t* dyn, int ninst, int s1, int next);
+void doPreload(dynarec_rv64_t* dyn, int ninst);
 void avx_set_vector_width(dynarec_rv64_t* dyn, int ninst, int s1, int sew, int width);
 void avx_load_reg_vector(dynarec_rv64_t* dyn, int ninst, int s1, int vreg, int a, int width, int sew);
 void avx_store_reg_vector(dynarec_rv64_t* dyn, int ninst, int s1, int vreg, int a, int width, int sew);
+
+#define emit_mxcsr_raise_invalid(s1)             \
+    do {                                         \
+        LW(s1, xEmu, offsetof(x64emu_t, mxcsr)); \
+        ORI(s1, s1, 1);                          \
+        SW(s1, xEmu, offsetof(x64emu_t, mxcsr)); \
+    } while (0)
 
 static inline void sse_set_pending_zero(dynarec_rv64_t* dyn, int a, int pending)
 {
