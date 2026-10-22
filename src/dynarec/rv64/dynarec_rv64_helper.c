@@ -2804,9 +2804,20 @@ void rv64_move32(dynarec_rv64_t* dyn, int ninst, int reg, int32_t val, int zerou
 
 void rv64_move64(dynarec_rv64_t* dyn, int ninst, int reg, int64_t val)
 {
+    uint64_t uval = (uint64_t)val;
+    if (cpuext.zbs && uval && !(uval & (uval - 1))) {
+        BSETI_(reg, xZR, TrailingZeros64(uval));
+        return;
+    }
+
     if (((val << 32) >> 32) == val) {
         // 32bits value
         rv64_move32(dyn, ninst, reg, val, 0);
+        return;
+    }
+    if (!(uval & (uval + 1))) {
+        ADDI(reg, xZR, -1);
+        SRLI(reg, reg, 64 - TrailingZeros64(~uval));
         return;
     }
 
