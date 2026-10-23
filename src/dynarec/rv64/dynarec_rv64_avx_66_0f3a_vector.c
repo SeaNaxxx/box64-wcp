@@ -118,9 +118,7 @@ uintptr_t dynarec64_AVX_66_0F3A_vector(dynarec_rv64_t* dyn, uintptr_t addr, uint
             VEC_SRC_KEEP(q0, v0);
             q1 = fpu_get_scratch(dyn);
             MOV64x(x4, (uint64_t)(u8 & 1) | ((uint64_t)((u8 >> 1) & 1) << 16) | ((uint64_t)(((u8 >> 2) & 1) + 2) << 32) | ((uint64_t)(((u8 >> 3) & 1) + 2) << 48));
-            vector_vsetvli(dyn, ninst, x1, VECTOR_SEW64, VECTOR_LMUL1, 1);
             VMV_S_X(q1, x4);
-            avx_set_vector_width(dyn, ninst, x1, VECTOR_SEW64, 16 << vex.l);
             VRGATHEREI16_VV(v0, q0, q1, VECTOR_UNMASKED);
             PUTGY_vector(v0, VECTOR_SEW64);
             break;
@@ -138,11 +136,11 @@ uintptr_t dynarec64_AVX_66_0F3A_vector(dynarec_rv64_t* dyn, uintptr_t addr, uint
                 int zero = j ? (u8 & 0x80) : (u8 & 0x08);
                 int mask = j ? 0xc : 0x3;
                 if (zero) {
-                    VECTOR_LOAD_VMASK(mask, x4, 1);
+                    VECTOR_LOAD_VMASK(mask, x4, 2);
                     VXOR_VV(v0, v0, v0, VECTOR_MASKED);
                 } else if (control != j) {
                     int src = (control & 2) ? q1 : q0;
-                    VECTOR_LOAD_VMASK(mask, x4, 1);
+                    VECTOR_LOAD_VMASK(mask, x4, 2);
                     if (((j == 0) && ((control & 1) == 0)) || ((j == 1) && ((control & 1) == 1))) {
                         VMERGE_VVM(v0, v0, src);
                     } else {
@@ -356,11 +354,11 @@ uintptr_t dynarec64_AVX_66_0F3A_vector(dynarec_rv64_t* dyn, uintptr_t addr, uint
                 int zero = j ? (u8 & 0x80) : (u8 & 0x08);
                 int mask = j ? 0xc : 0x3;
                 if (zero) {
-                    VECTOR_LOAD_VMASK(mask, x4, 1);
+                    VECTOR_LOAD_VMASK(mask, x4, 2);
                     VXOR_VV(v0, v0, v0, VECTOR_MASKED);
                 } else if (control != j) {
                     int src = (control & 2) ? q1 : q0;
-                    VECTOR_LOAD_VMASK(mask, x4, 1);
+                    VECTOR_LOAD_VMASK(mask, x4, 2);
                     if (((j == 0) && ((control & 1) == 0)) || ((j == 1) && ((control & 1) == 1))) {
                         VMERGE_VVM(v0, v0, src);
                     } else {
