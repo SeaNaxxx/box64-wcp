@@ -443,7 +443,7 @@ void doEnterBlock(dynarec_rv64_t* dyn, int ninst, int s1, int s2, int s3)
     LD(s1, s1, 0); // load the dynablock pointer
     ADDI(s1, s1, offsetof(dynablock_t, in_used));
     MOV32w(s3, 1);
-    AMOADD_W(s2, s3, s1, 0, 0);
+    AMOADD_W(s2, s3, s1, 0, 1);
 }
 
 void doLeaveBlock(dynarec_rv64_t* dyn, int ninst, int s1, int s2, int s3)
@@ -455,7 +455,7 @@ void doLeaveBlock(dynarec_rv64_t* dyn, int ninst, int s1, int s2, int s3)
     LD(s1, s1, 0); // load the dynablock pointer
     ADDI(s1, s1, offsetof(dynablock_t, in_used));
     MOV32w(s3, -1);
-    AMOADD_W(s2, s3, s1, 0, 0);
+    AMOADD_W(s2, s3, s1, 0, 1);
 }
 #ifdef JMPTABLE_SHIFT4
 #error TODO!
@@ -1983,7 +1983,7 @@ static void sse_reflectcache(dynarec_rv64_t* dyn, int ninst, int s1)
                 flushed8 = 1;
                 ADDI(s1, xEmu, offsetof(x64emu_t, xmm[i]));
                 VSE8_V(dyn->e.ssecache[i].reg, s1, VECTOR_UNMASKED, VECTOR_NFIELD1);
-                avx_flush_upper_vector(dyn, ninst, s1, i, dyn->e.ssecache[i].reg, 0, 1);
+                avx_flush_upper_vector(dyn, ninst, s1, i, dyn->e.ssecache[i].reg, 0, 0);
             } else if (dyn->e.ssecache[i].single)
                 FSW(dyn->e.ssecache[i].reg, xEmu, offsetof(x64emu_t, xmm[i]));
             else
