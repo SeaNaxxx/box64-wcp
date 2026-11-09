@@ -385,6 +385,8 @@ endif()
 set(BOX64_ROOT ${CMAKE_SOURCE_DIR})
 
 add_definitions(-std=gnu11 -funwind-tables -fvisibility=hidden)
+add_definitions(-D_GNU_SOURCE=1)
+add_definitions(-D_FILE_OFFSET_BITS=64)
 
 if(USE_CCACHE)
     find_program(CCACHE_FOUND ccache)
@@ -1559,6 +1561,9 @@ if(NOT _x86 AND NOT _x86_64 AND NOT NOBOX64)
 
   endif()
   set(INSTALL_PATH "/usr/lib/box64-x86_64-linux-gnu")
+  if(NOT NO_LIB_INSTALL AND NOT TERMUX AND NOT ANDROID)
+    install(FILES ${CMAKE_SOURCE_DIR}/x64lib/libwemeet_unlock_shim.so DESTINATION ${INSTALL_PATH})
+  endif()
   if(NOT NO_LIB_INSTALL)
 	if(NOT TERMUX AND NOT ANDROID)
         install(FILES ${CMAKE_SOURCE_DIR}/x64lib/libstdc++.so.5 DESTINATION ${INSTALL_PATH})
