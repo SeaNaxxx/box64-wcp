@@ -1514,6 +1514,29 @@ int fpu_borrow_reg(dynarec_rv64_t* dyn, int ninst, int s1, int s2, int reg)
     return reg;
 }
 
+// Borrow count scratch vector registers, preferring x87/MMX slots that do not hold a cached value.
+void fpu_borrow_regs(dynarec_rv64_t* dyn, int ninst, int s1, int s2, int* regs, int count, int first)
+{
+    int used[16] = {0};
+    int n = 0, r;
+
+    for (r = 8; r < 16 && n < count; ++r)
+        if (!dyn->e.extcache[EXTIDX(r)].v) {
+            regs[n++] = r;
+            used[r] = 1;
+        }
+    for (; n < count; ++n) {
+        for (r = first; r < 16; ++r)
+            if (!used[r]) break;
+        if (r >= 16)
+            for (r = 8; r < 16; ++r)
+                if (!used[r]) break;
+        if (r >= 16) r = first + n;
+        regs[n] = fpu_borrow_reg(dyn, ninst, s1, s2, r);
+        used[r] = 1;
+    }
+}
+
 void mmx_flush_reg_preserve_vtype(dynarec_rv64_t* dyn, int ninst, int s1, int a)
 {
     if (dyn->e.mmxcache[a].v == -1)
@@ -1690,6 +1713,19 @@ static void sse_mark_used(dynarec_rv64_t* dyn, int ninst, int a)
         dyn->insts[ninst].vec_used |= 1u << a;
 }
 
+static void sse_save_entry_cache(dynarec_rv64_t* dyn, int a)
+{
+    const sse_cache_t* s = &dyn->e.ssecache[a];
+    if (s->v == -1 || dyn->e.olds[a].v)
+        return;
+    int idx = EXTIDX(s->reg);
+    if (dyn->e.news & (1u << idx))
+        return;
+    sse_sync_cache_type(&dyn->e, a);
+    dyn->e.olds[a] = dyn->e.extcache[idx];
+    dyn->e.olds[a].y = s->vector && s->ymm;
+}
+
 // SSE / SSE2 helpers
 // get ext register for a SSE reg, create the entry if needed
 int sse_get_reg(dynarec_rv64_t* dyn, int ninst, int s1, int a, int single)
@@ -1699,18 +1735,11 @@ int sse_get_reg(dynarec_rv64_t* dyn, int ninst, int s1, int a, int single)
         if (dyn->e.ssecache[a].vector == 1) {
             // it's in the fpu, forget it first...
             sse_forget_reg_vector(dyn, ninst, s1, a);
-            // update olds after the forget...
-            dyn->e.olds[a].changed = 1;
-            dyn->e.olds[a].purged = 0;
             return sse_get_reg(dyn, ninst, s1, a, single);
         }
         // forget / reload if change of size
         if (dyn->e.ssecache[a].single != single) {
             sse_forget_reg(dyn, ninst, s1, a);
-            // update olds after the forget...
-            dyn->e.olds[a].changed = 1;
-            dyn->e.olds[a].purged = 0;
-            dyn->e.olds[a].type = 1 - single;
             return sse_get_reg(dyn, ninst, s1, a, single);
         }
         return dyn->e.ssecache[a].reg;
@@ -1736,21 +1765,15 @@ int sse_get_reg_empty(dynarec_rv64_t* dyn, int ninst, int s1, int a, int single)
         if (dyn->e.ssecache[a].vector == 1) {
             // it's in the vpu, forget it first...
             sse_forget_reg_vector(dyn, ninst, s1, a);
-            // update olds after the forget...
-            dyn->e.olds[a].changed = 1;
-            dyn->e.olds[a].purged = 0;
             return sse_get_reg_empty(dyn, ninst, s1, a, single);
         }
 
         if (dyn->e.ssecache[a].single != single) {
+            sse_save_entry_cache(dyn, a);
             if (dyn->e.ssecache[a].single)
                 FSW(dyn->e.ssecache[a].reg, xEmu, offsetof(x64emu_t, xmm[a]));
             else
                 FSD(dyn->e.ssecache[a].reg, xEmu, offsetof(x64emu_t, xmm[a]));
-            dyn->e.olds[a].changed = 1;
-            dyn->e.olds[a].purged = 0;
-            dyn->e.olds[a].reg = EXTIDX(dyn->e.ssecache[a].reg);
-            dyn->e.olds[a].type = 1 - single;
             dyn->e.ssecache[a].single = single;
             dyn->e.ssecache[a].vector = 0;
             dyn->e.extcache[EXTIDX(dyn->e.ssecache[a].reg)].t = single ? EXT_CACHE_SS : EXT_CACHE_SD;
@@ -1772,9 +1795,6 @@ int sse_get_reg_size_changed(dynarec_rv64_t* dyn, int ninst, int s1, int a, int 
         if (dyn->e.ssecache[a].vector == 1) {
             // it's in the vpu, forget it first...
             sse_forget_reg_vector(dyn, ninst, s1, a);
-            // update olds after the forget...
-            dyn->e.olds[a].changed = 1;
-            dyn->e.olds[a].purged = 0;
             return sse_get_reg_size_changed(dyn, ninst, s1, a, single);
         }
 
@@ -1803,15 +1823,12 @@ void sse_forget_reg(dynarec_rv64_t* dyn, int ninst, int s1, int a)
     sse_mark_used(dyn, ninst, a);
     if (dyn->e.ssecache[a].vector == 1)
         return sse_forget_reg_vector(dyn, ninst, s1, a);
+    sse_save_entry_cache(dyn, a);
     if (dyn->e.ssecache[a].single)
         FSW(dyn->e.ssecache[a].reg, xEmu, offsetof(x64emu_t, xmm[a]));
     else
         FSD(dyn->e.ssecache[a].reg, xEmu, offsetof(x64emu_t, xmm[a]));
     fpu_free_reg(dyn, dyn->e.ssecache[a].reg);
-    dyn->e.olds[a].changed = 0;
-    dyn->e.olds[a].purged = 1;
-    dyn->e.olds[a].reg = EXTIDX(dyn->e.ssecache[a].reg);
-    dyn->e.olds[a].type = dyn->e.ssecache[a].single;
     dyn->e.ssecache[a].v = -1;
     return;
 }
@@ -1826,17 +1843,11 @@ int sse_get_reg_vector(dynarec_rv64_t* dyn, int ninst, int s1, int a, int forwri
         if (dyn->e.ssecache[a].vector == 0) {
             // it's in the fpu, forget it first...
             sse_forget_reg(dyn, ninst, s1, a);
-            // update olds after the forget...
-            dyn->e.olds[a].changed = 1;
-            dyn->e.olds[a].purged = 0;
             return sse_get_reg_vector(dyn, ninst, s1, a, forwrite, sew);
         }
 
         if (forwrite) {
-            dyn->e.olds[a].changed = 1;
-            dyn->e.olds[a].purged = 0;
-            dyn->e.olds[a].reg = EXTIDX(dyn->e.ssecache[a].reg);
-            dyn->e.olds[a].type = EXT_CACHE_OLD_XMMW;
+            sse_save_entry_cache(dyn, a);
             dyn->e.ssecache[a].write = 1;  // update only if forwrite
             dyn->e.ssecache[a].single = 0; // just to be clean
             dyn->e.extcache[EXTIDX(dyn->e.ssecache[a].reg)].t = EXT_CACHE_XMMW;
@@ -1861,15 +1872,9 @@ int sse_get_reg_empty_vector(dynarec_rv64_t* dyn, int ninst, int s1, int a)
         if (dyn->e.ssecache[a].vector == 0) {
             // it's in the fpu, forget it first...
             sse_forget_reg(dyn, ninst, s1, a);
-            // update olds after the forget...
-            dyn->e.olds[a].changed = 1;
-            dyn->e.olds[a].purged = 0;
             return sse_get_reg_empty_vector(dyn, ninst, s1, a);
         }
-        dyn->e.olds[a].changed = 1;
-        dyn->e.olds[a].purged = 0;
-        dyn->e.olds[a].reg = EXTIDX(dyn->e.ssecache[a].reg);
-        dyn->e.olds[a].type = EXT_CACHE_OLD_XMMW;
+        sse_save_entry_cache(dyn, a);
         dyn->e.ssecache[a].vector = 1;
         dyn->e.ssecache[a].write = 1;
         dyn->e.ssecache[a].single = 0; // just to be clean
@@ -1892,6 +1897,7 @@ void sse_forget_reg_vector(dynarec_rv64_t* dyn, int ninst, int s1, int a)
         return;
     if (dyn->e.ssecache[a].vector == 0)
         return sse_forget_reg(dyn, ninst, s1, a);
+    sse_save_entry_cache(dyn, a);
     if (dyn->e.extcache[EXTIDX(dyn->e.ssecache[a].reg)].t == EXT_CACHE_XMMW
         || dyn->e.extcache[EXTIDX(dyn->e.ssecache[a].reg)].t == EXT_CACHE_YMMW) {
         uint8_t sew, vlmul, vl;
@@ -1903,10 +1909,6 @@ void sse_forget_reg_vector(dynarec_rv64_t* dyn, int ninst, int s1, int a)
         vector_restore_vtype(dyn, ninst, s1, sew, vlmul, vl);
     }
     fpu_free_reg(dyn, dyn->e.ssecache[a].reg);
-    dyn->e.olds[a].changed = 0;
-    dyn->e.olds[a].purged = 1;
-    dyn->e.olds[a].type = dyn->e.ssecache[a].write ? EXT_CACHE_OLD_XMMW : EXT_CACHE_OLD_XMMR;
-    dyn->e.olds[a].reg = EXTIDX(dyn->e.ssecache[a].reg);
     dyn->e.ssecache[a].v = -1;
     return;
 }
@@ -1920,6 +1922,7 @@ void sse_purge07cache(dynarec_rv64_t* dyn, int ninst, int s1)
     vector_save_vtype(dyn, &sew, &vlmul, &vl);
     for (int i = 0; i < 8; ++i)
         if (dyn->e.ssecache[i].v != -1) {
+            sse_save_entry_cache(dyn, i);
             if (old == -1) {
                 MESSAGE(LOG_DUMP, "\tPurge XMM0..7 Cache ------\n");
                 ++old;
@@ -1956,6 +1959,8 @@ static void sse_purgecache(dynarec_rv64_t* dyn, int ninst, int next, int s1)
     dyn->inst_vl = 0;
     for (int i = 0; i < 16; ++i)
         if (dyn->e.ssecache[i].v != -1) {
+            if (!next)
+                sse_save_entry_cache(dyn, i);
             if (old == -1) {
                 MESSAGE(LOG_DUMP, "\tPurge %sSSE Cache ------\n", next ? "locally " : "");
                 ++old;
@@ -1976,10 +1981,6 @@ static void sse_purgecache(dynarec_rv64_t* dyn, int ninst, int next, int s1)
                 FSD(dyn->e.ssecache[i].reg, xEmu, offsetof(x64emu_t, xmm[i]));
             if (!next) {
                 fpu_free_reg(dyn, dyn->e.ssecache[i].reg);
-                dyn->e.olds[i].changed = 0;
-                dyn->e.olds[i].purged = 1;
-                dyn->e.olds[i].type = dyn->e.ssecache[i].vector ? (dyn->e.ssecache[i].write ? EXT_CACHE_OLD_XMMW : EXT_CACHE_OLD_XMMR) : dyn->e.ssecache[i].single;
-                dyn->e.olds[i].reg = dyn->e.ssecache[i].reg;
                 dyn->e.ssecache[i].v = -1;
             }
         }
@@ -2699,6 +2700,7 @@ static void fpuCacheTransform(dynarec_rv64_t* dyn, int ninst, int s1, int s2, in
     }
     extcache_t cache_i2 = dyn->insts[i2].e;
     extcacheUnwind(&cache_i2);
+    sse_restore_entry_ymm0(dyn, &cache_i2, i2);
 
     if (!cache_i2.stack) {
         int purge = 1;
@@ -3117,6 +3119,8 @@ void fpu_propagate_stack(dynarec_rv64_t* dyn, int ninst)
     dyn->e.news = 0;
     dyn->e.stack_push = 0;
     dyn->e.swapped = 0;
+    for (int i = 0; i < 16; ++i)
+        dyn->e.olds[i].v = 0;
 }
 
 void avx_flush_upper_vector(dynarec_rv64_t* dyn, int ninst, int s1, int a, int reg, int next, int dead)
@@ -3220,6 +3224,9 @@ void avx_load_reg_vector(dynarec_rv64_t* dyn, int ninst, int s1, int vreg, int a
         return;
     }
     int low;
+    if (width == 32 && dyn->e.ssecache[a].v != -1
+        && dyn->e.ssecache[a].vector && !dyn->e.ssecache[a].ymm)
+        sse_save_entry_cache(dyn, a);
     if (width >= 16) {
         avx_set_vector_width(dyn, ninst, s1, sew, width);
         low = sse_get_reg_vector(dyn, ninst, s1, a, 0, sew);

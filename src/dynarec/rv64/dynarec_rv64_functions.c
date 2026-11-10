@@ -395,6 +395,7 @@ int fpuCacheNeedsTransform(dynarec_rv64_t* dyn, int ninst)
     }
     extcache_t cache_i2 = dyn->insts[i2].e;
     extcacheUnwind(&cache_i2);
+    sse_restore_entry_ymm0(dyn, &cache_i2, i2);
 
     for (int i = 0; i < 24; ++i) {
         if (dyn->insts[ninst].e.extcache[i].v) { // there is something at ninst for i
@@ -433,7 +434,7 @@ void extcacheUnwind(extcache_t* cache)
     if (!cache->swapped && !cache->news && !cache->stack_push && !cache->stack_pop) {
         int dirty = 0;
         for (int i = 0; i < 16; ++i)
-            if (cache->olds[i].changed || cache->olds[i].purged) {
+            if (cache->olds[i].v) {
                 dirty = 1;
                 break;
             }
@@ -467,24 +468,16 @@ void extcacheUnwind(extcache_t* cache)
     if (cache->news) {
         // remove the newly created extcache
         for (int i = 0; i < 24; ++i)
-            if ((cache->news & (1 << i)) && !cache->olds[i].changed)
+            if (cache->news & (1u << i))
                 cache->extcache[i].v = 0;
         cache->news = 0;
     }
     // add/change bad regs
     for (int i = 0; i < 16; ++i) {
-        if (cache->olds[i].changed || cache->olds[i].purged) {
-            if (cache->olds[i].type == EXT_CACHE_OLD_XMMR)
-                cache->extcache[i].t = EXT_CACHE_XMMR;
-            else if (cache->olds[i].type == EXT_CACHE_OLD_XMMW)
-                cache->extcache[i].t = EXT_CACHE_XMMW;
-            else if (cache->olds[i].type == EXT_CACHE_OLD_SS)
-                cache->extcache[i].t = EXT_CACHE_SS;
-            else if (cache->olds[i].type == EXT_CACHE_OLD_SD)
-                cache->extcache[i].t = EXT_CACHE_SD;
-
-            if (cache->olds[i].purged)
-                cache->extcache[i].n = i;
+        if (cache->olds[i].v) {
+            cache->extcache[i] = cache->olds[i];
+            // the undo log has been applied, don't reapply it on a second unwind
+            cache->olds[i].v = 0;
         }
     }
 
