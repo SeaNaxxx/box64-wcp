@@ -566,8 +566,6 @@ void ret_to_next(dynarec_rv64_t* dyn, uintptr_t ip, int ninst, rex_t rex)
         ADDI(xSP, xSP, 16);   // pop
         if (BOX64DRENV(dynarec_callret) >= 3)
             doLeaveBlock(dyn, ninst, x4, x5, x7);
-        else if (!BOX64DRENV(dynarec_strongmem))
-            DMB_TSO();
         BNE(x6, xRIP, 2 * 4); // is it the right address?
         BR(xRA);
         // not the correct return address, regular jump, but purge the stack first, it's unsync now...
@@ -1829,9 +1827,9 @@ int sse_get_reg_size_changed(dynarec_rv64_t* dyn, int ninst, int s1, int a, int 
 // forget ext register for a SSE reg, does nothing if the regs is not loaded
 void sse_forget_reg(dynarec_rv64_t* dyn, int ninst, int s1, int a)
 {
+    sse_mark_used(dyn, ninst, a);
     if (dyn->e.ssecache[a].v == -1)
         return;
-    sse_mark_used(dyn, ninst, a);
     if (dyn->e.ssecache[a].vector == 1)
         return sse_forget_reg_vector(dyn, ninst, s1, a);
     sse_save_entry_cache(dyn, a);
