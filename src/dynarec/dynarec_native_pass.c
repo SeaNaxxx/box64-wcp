@@ -19,7 +19,7 @@
 #include "dynablock_private.h"
 #include "custommem.h"
 #include "x64test.h"
-#include "pe_tools.h"
+#include "volatile_fences.h"
 
 #include "dynarec_arch.h"
 #include "dynarec_helper.h"
@@ -226,7 +226,7 @@ uintptr_t native_pass(dynarec_native_t* dyn, uintptr_t addr, int alternate, int 
             WILLWRITE();
         }
         #endif
-        int is_opcode_volatile = /*box64_wine &&*/ VolatileRangesContains(ip) && VolatileOpcodesHas(ip);
+        int is_opcode_volatile = VolatileFenceNeedsFence(ip);
         #if defined(ARM64) && STEP == 1
         if(is_opcode_volatile && cpuext.lrcpc && cpuext.lrcpc2 && cpuext.uscat) dyn->insts[ninst].use_lrcpc = 1;
         #endif
@@ -343,12 +343,6 @@ uintptr_t native_pass(dynarec_native_t* dyn, uintptr_t addr, int alternate, int 
             #endif
         } 
         #endif
-        #if defined(ARM64) || defined(LA64) || defined(RV64)
-        if(dyn->insts[ninst].x64.has_next && dyn->insts[ninst+1].preload_xmmymm) {
-            doPreload(dyn, ninst+1);
-        }
-        #endif
-
         fpu_reset_scratch(dyn);
         int next = ninst+1;
         #if STEP > 0
@@ -371,6 +365,11 @@ uintptr_t native_pass(dynarec_native_t* dyn, uintptr_t addr, int alternate, int 
         #if defined(RV64)
         if(dyn->insts[ninst].x64.has_next && dyn->insts[next].promote_ymm && !(dyn->insts[next].x64.barrier & BARRIER_FLOAT)) {
             avx_promote_upper(dyn, ninst, x1, dyn->insts[next].promote_ymm);
+        }
+        #endif
+        #if defined(ARM64) || defined(LA64) || defined(RV64)
+        if(dyn->insts[ninst].x64.has_next && dyn->insts[ninst+1].preload_xmmymm) {
+            doPreload(dyn, ninst+1);
         }
         #endif
         #endif
