@@ -1106,13 +1106,13 @@ void x87_do_pop(dynarec_la64_t* dyn, int ninst, int s1)
 
 void x87_purgecache(dynarec_la64_t* dyn, int ninst, int next, int s1, int s2, int s3)
 {
-    dyn->insts[ninst].x87_used = 1;
     int ret = 0;
     for (int i = 0; i < 8 && !ret; ++i)
         if (dyn->lsx.x87cache[i] != -1)
             ret = 1;
     if (!ret && !dyn->lsx.x87stack) // nothing to do
         return;
+    dyn->insts[ninst].x87_used = 1;
     MESSAGE(LOG_DUMP, "\tPurge %sx87 Cache and Synch Stackcount (%+d)---\n", next ? "locally " : "", dyn->lsx.x87stack);
     int a = dyn->lsx.x87stack;
     if (a != 0) {
@@ -2309,10 +2309,18 @@ static int canSkipFpuUnload(dynarec_la64_t* dyn, int i2, int type, int n)
             return 0;
         if (lsx->avxcache[n].v != -1) // full width write only, skip
             return 1;
-        if (lsx->ssecache[n].v != -1)
-            return (type == LSX_CACHE_XMMW); // skip XMM write
-        if (lsx->scalarcache[n] != -1)
+        if (lsx->ssecache[n].v != -1) {
+            if (type == LSX_CACHE_XMMW)
+                return 1;
+            if (type == LSX_CACHE_XMM_S && (lsx->news & (1u << lsx->ssecache[n].reg)))
+                return 1;
             return 0;
+        }
+        if (lsx->scalarcache[n] != -1) {
+            if (type == LSX_CACHE_XMM_S && (lsx->news & (1u << lsx->scalarcache[n])))
+                return 1;
+            return 0;
+        }
         if (inst->x64.jmp)
             return 0;
     }
@@ -2342,18 +2350,6 @@ static void fpuCacheTransform(dynarec_la64_t* dyn, int ninst, int s1, int s2, in
     }
     lsxcache_t cache_i2 = dyn->insts[i2].lsx;
     lsxcacheUnwind(&cache_i2);
-
-    if (!cache_i2.stack) {
-        int purge = 1;
-        for (int i = 0; i < 24 && purge; ++i)
-            if (cache_i2.lsxcache[i].v)
-                purge = 0;
-        if (purge) {
-            fpu_purgecache(dyn, ninst, 1, s1, s2, s3);
-            MESSAGE(LOG_DUMP, "\t---- Cache Transform\n");
-            return;
-        }
-    }
 
     int stack_cnt = dyn->lsx.stack_next;
     int s3_top = 0xffff;
