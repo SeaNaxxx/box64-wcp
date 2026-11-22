@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 #include <math.h>
+#include <float.h>
 #include <fenv.h>
 #include "regs.h"
 #include "x64run_private.h"
@@ -68,7 +69,12 @@ static inline double fpu_narrow(double d)
         u.q = (u.q & 0xFFFFFFFFE0000000ULL) | 0x0008000000000000ULL;
         return u.d;
     }
-    return (float)d;
+    if (fabs(d) >= FLT_MIN && fabs(d) <= FLT_MAX)
+        return (float)d;
+    // x87 keeps its exponent range, only the significand is rounded
+    int e;
+    double m = frexp(d, &e);
+    return ldexp((float)m, e);
 }
 
 static inline float fpu_to_float(double d)
@@ -410,7 +416,7 @@ static inline void fpu_fxam(x64emu_t* emu) {
 
 static inline void fpu_ftst(x64emu_t* emu) {
     emu->sw.f.F87_C1 = 0;
-    if(isinf(ST0.d) || isnan(ST0.d)) 
+    if(isnan(ST0.d))
     {  // TODO: Unsupported and denormal not analysed...
         emu->sw.f.F87_C3 = 1;
         emu->sw.f.F87_C2 = 1;
