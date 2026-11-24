@@ -546,6 +546,12 @@ int my_sigactionhandler_oldcode_32(x64emu_t* emu, int32_t sig, int simple, sigin
     fpu_xsave_mask(emu, xstate, 1, 0b111);
     memcpy(&sigcontext->xstate, xstate, sizeof(sigcontext->xstate));
     ((struct i386_fpstate*)xstate)->status_magic = 0x46505853;   // magic number to signal an XSTATE type of fpregs
+    reset_fpu(emu);
+    for (int i = 0; i < 16; ++i) {
+        emu->xmm[i].u128 = 0;
+        emu->ymm[i].u128 = 0;
+    }
+    emu->mxcsr.x32 = 0x1f80;
     // get signal mask
 
     if(new_ss) {
@@ -722,6 +728,7 @@ int my_sigactionhandler_oldcode_32(x64emu_t* emu, int32_t sig, int simple, sigin
     #undef GO
 
     if(memcmp(sigcontext, &sigcontext_copy, sizeof(i386_ucontext_t))) {
+        fpu_xrstor_mask(emu, xstate, 1, 0b111);
         if(emu->jmpbuf) {
             #define GO(R)   emu->regs[_##R].q[0]=sigcontext->uc_mcontext.gregs[I386_E##R]
             GO(AX);
@@ -773,6 +780,7 @@ int my_sigactionhandler_oldcode_32(x64emu_t* emu, int32_t sig, int simple, sigin
         }
         printf_log(LOG_INFO, "Warning, context has been changed in Sigactionhanlder%s\n", (sigcontext->uc_mcontext.gregs[I386_EIP]!=sigcontext_copy.uc_mcontext.gregs[I386_EIP])?" (EIP changed)":"");
     }
+    fpu_xrstor_mask(emu, xstate, 1, 0b111);
     // restore regs...
     #define GO(R)   R_##R=sigcontext->uc_mcontext.gregs[I386_##R]
     GO(EAX);
@@ -916,6 +924,30 @@ EXPORT int my32_sigaction(x64emu_t* emu, int signum, const i386_sigaction_t *act
 }
 EXPORT int my32___sigaction(x64emu_t* emu, int signum, const i386_sigaction_t *act, i386_sigaction_t *oldact)
 __attribute__((alias("my32_sigaction")));
+
+EXPORT int my32_syscall_rt_sigaction(x64emu_t* emu, int signum, const i386_sigaction_restorer_t *act, i386_sigaction_restorer_t *oldact, int sigsetsize)
+{
+    if(signum < 0 || signum > MAX_SIGNAL || sigsetsize != 8) {
+        errno = EINVAL;
+        return -1;
+    }
+    i386_sigaction_t kact, kold;
+    if(act) {
+        memset(&kact, 0, sizeof(kact));
+        kact._u._sa_handler = act->_u._sa_handler;
+        kact.sa_flags = act->sa_flags;
+        kact.sa_restorer = act->sa_restorer;
+        memcpy(&kact.sa_mask, &act->sa_mask, sigsetsize);
+    }
+    int ret = my32_sigaction(emu, signum, act?&kact:NULL, oldact?&kold:NULL);
+    if(oldact && ret==0) {
+        oldact->_u._sa_handler = kold._u._sa_handler;
+        oldact->sa_flags = kold.sa_flags;
+        oldact->sa_restorer = kold.sa_restorer;
+        memcpy(&oldact->sa_mask, &kold.sa_mask, sigsetsize);
+    }
+    return ret;
+}
 
 EXPORT int my32_getcontext(x64emu_t* emu, void* ucp)
 {

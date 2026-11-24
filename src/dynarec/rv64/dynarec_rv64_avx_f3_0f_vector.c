@@ -198,6 +198,7 @@ uintptr_t dynarec64_AVX_F3_0F_vector(dynarec_rv64_t* dyn, uintptr_t addr, uintpt
             simd_load_reg(dyn, ninst, x1, q0, vex.v, 16, VECTOR_SEW32);
             if (MODREG) {
                 ed = TO_NAT((nextop & 7) + (rex.b << 3));
+                MARKREGs(ed);
             } else {
                 SMREAD();
                 addr = geted(dyn, addr, ninst, nextop, &ed, x2, x3, &fixedaddress, rex, NULL, 0, 0);
@@ -374,6 +375,11 @@ uintptr_t dynarec64_AVX_F3_0F_vector(dynarec_rv64_t* dyn, uintptr_t addr, uintpt
                 BEQ_MARK(x5, xZR);
                 emit_mxcsr_raise_invalid(x4);
                 MARK;
+                FRFLAGS(x5);
+                ANDI(x5, x5, 1 << FR_NX);
+                BEQ_MARK2(x5, xZR);
+                emit_mxcsr_raise_precision(x4);
+                MARK2;
                 VMV_V_V(v0, v1);
             }
             PUTGY_vector(v0, VECTOR_SEW32);
