@@ -12,6 +12,7 @@
 #include <setjmp.h>
 #include <sys/mman.h>
 #include <pthread.h>
+#include <signal.h>
 #ifndef ANDROID
 #include <execinfo.h>
 #endif
@@ -521,6 +522,18 @@ int my_sigactionhandler_oldcode_32(x64emu_t* emu, int32_t sig, int simple, sigin
     // try to fill some sigcontext....
     frame -= sizeof(i386_ucontext_t);
     i386_ucontext_t   *sigcontext = (i386_ucontext_t*)frame;
+    const size_t sigmask_sz = (sizeof(sigset_t)<=sizeof(i386_sigset_t))?sizeof(sigset_t):sizeof(i386_sigset_t);
+    if(ucntx)
+        memcpy(&sigcontext->uc_sigmask, &((ucontext_t *)ucntx)->uc_sigmask, sigmask_sz);
+    else {
+        if(sizeof(sigset_t)==sizeof(i386_sigset_t))
+            sigprocmask(SIG_SETMASK, NULL, (sigset_t*)&sigcontext->uc_sigmask);
+        else {
+            sigset_t tmp = {0};
+            sigprocmask(SIG_SETMASK, NULL, &tmp);
+            memcpy(&sigcontext->uc_sigmask, &tmp, sigmask_sz);
+        }
+    }
     // get general register
     sigcontext->uc_mcontext.gregs[I386_EAX] = R_EAX;
     sigcontext->uc_mcontext.gregs[I386_ECX] = R_ECX;
@@ -773,12 +786,29 @@ int my_sigactionhandler_oldcode_32(x64emu_t* emu, int32_t sig, int simple, sigin
             #endif
             cancel_deferred_signal_processing(emu);
             #ifdef ANDROID
-            siglongjmp(*emu->jmpbuf, skip);
+            // cannot inject sigmask in jumpbuf, as the data is private and format/offset varies with architecture
+            sigset_t tmp = {0};
+            memcpy(&tmp, &sigcontext->uc_sigmask, sigmask_sz);
+            sigprocmask(SIG_SETMASK, &tmp, NULL);
+            longjmp(*emu->jmpbuf, skip);
             #else
-            siglongjmp(emu->jmpbuf, skip);
+            memcpy(&emu->jmpbuf->__saved_mask, &sigcontext->uc_sigmask, sigmask_sz);
+            emu->jmpbuf->__mask_was_saved = 1;
+            longjmp(emu->jmpbuf, skip);
             #endif
         }
         printf_log(LOG_INFO, "Warning, context has been changed in Sigactionhanlder%s\n", (sigcontext->uc_mcontext.gregs[I386_EIP]!=sigcontext_copy.uc_mcontext.gregs[I386_EIP])?" (EIP changed)":"");
+        if(ucntx)
+            memcpy(&((ucontext_t*)ucntx)->uc_sigmask, &sigcontext->uc_sigmask, sigmask_sz);
+        else {
+            if(sizeof(sigset_t)==sizeof(i386_sigset_t))
+                sigprocmask(SIG_SETMASK, (sigset_t*)&sigcontext->uc_mcontext, NULL);
+            else {
+                sigset_t tmp = {0};
+                memcpy(&tmp, &sigcontext->uc_sigmask, sigmask_sz);
+                sigprocmask(SIG_SETMASK, &tmp, NULL);
+            }
+        }
     }
     fpu_xrstor_mask(emu, xstate, 1, 0b111);
     // restore regs...
