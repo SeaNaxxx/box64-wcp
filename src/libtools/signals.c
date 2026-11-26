@@ -13,7 +13,7 @@
 #include <sys/mman.h>
 #include <pthread.h>
 #include <signal.h>
-#ifndef ANDROID
+#ifdef USE_BACKTRACE
 #include <execinfo.h>
 #endif
 
@@ -448,8 +448,8 @@ int my_sigactionhandler_oldcode_64(x64emu_t* emu, int32_t sig, int simple, sigin
     // Refer to https://github.com/torvalds/linux/blob/v7.2/arch/x86/kernel/signal.c#L310
     reset_fpu(emu);
     for (int i = 0; i < 16; ++i) {
-        emu->xmm[i].u128 = 0;
-        emu->ymm[i].u128 = 0;
+        getXMM(emu, i)->u128 = 0;
+        getYMM(emu, i)->u128 = 0;
     }
     emu->mxcsr.x32 = 0x1f80; // x86 default MXCSR
     memcpy(&sigcontext->xstate, xstate, sizeof(sigcontext->xstate));
@@ -674,12 +674,16 @@ int my_sigactionhandler_oldcode_64(x64emu_t* emu, int32_t sig, int simple, sigin
             dynablock_leave_runtime((dynablock_t*)cur_db);
             #endif
             cancel_deferred_signal_processing(emu);
-            #ifdef ANDROID
-            // cannot inject sigmask in jumpbuf, as the data is private and format/offset varies with architecture
+            #ifndef __GLIBC__
+            // cannot inject sigmask in jumpbuf, as the data is private and format/offset varies with libc and architecture
             sigset_t tmp = {0};
             memcpy(&tmp, &sigcontext->uc_sigmask, sigmask_sz);
             sigprocmask(SIG_SETMASK, &tmp, NULL);
+            #ifdef ANDROID
             longjmp(*emu->jmpbuf, skip);
+            #else
+            longjmp(emu->jmpbuf, skip);
+            #endif
             #else
             memcpy(&emu->jmpbuf->__saved_mask, &sigcontext->uc_sigmask, sigmask_sz);
             emu->jmpbuf->__mask_was_saved = 1;
@@ -781,8 +785,7 @@ void my_sigactionhandler_oldcode(x64emu_t* emu, int32_t sig, int simple, siginfo
     multiuint_t old_op1;
     multiuint_t old_op2;
     multiuint_t old_res;
-    sse_regs_t old_xmm[16];
-    sse_regs_t old_ymm[16];
+    avx_regs_t old_ymm256[16];
     mmx87_regs_t old_mmx[8];
     mmx87_regs_t old_x87[8];
     uint32_t old_top = emu->top;
@@ -790,8 +793,7 @@ void my_sigactionhandler_oldcode(x64emu_t* emu, int32_t sig, int simple, siginfo
     int old_fpu_stack = emu->fpu_stack;
     uint16_t old_segs[6];
     uintptr_t old_segs_offs[6];
-    memcpy(old_xmm, emu->xmm, sizeof(old_xmm));
-    memcpy(old_ymm, emu->ymm, sizeof(old_ymm));
+    memcpy(old_ymm256, emu->ymm256, sizeof(old_ymm256));
     memcpy(old_mmx, emu->mmx, sizeof(old_mmx));
     memcpy(old_x87, emu->x87, sizeof(old_x87));
     memcpy(old_segs, emu->segs, sizeof(old_segs));
@@ -862,8 +864,7 @@ void my_sigactionhandler_oldcode(x64emu_t* emu, int32_t sig, int simple, siginfo
     GO(op2);
     GO(res);
     #undef GO
-    memcpy(emu->xmm, old_xmm, sizeof(old_xmm));
-    memcpy(emu->ymm, old_ymm, sizeof(old_ymm));
+    memcpy(emu->ymm256, old_ymm256, sizeof(old_ymm256));
     memcpy(emu->mmx, old_mmx, sizeof(old_mmx));
     memcpy(emu->x87, old_x87, sizeof(old_x87));
     memcpy(emu->segs, old_segs, sizeof(old_segs));
@@ -879,8 +880,10 @@ extern int fillblock_active;
 #ifdef USE_SIGNAL_MUTEX
 #ifdef USE_CUSTOM_MUTEX
 static uint32_t mutex_dynarec_prot = 0;
-#else
+#elif defined(PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP)
 static pthread_mutex_t mutex_dynarec_prot = PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP;
+#else
+static pthread_mutex_t mutex_dynarec_prot = PTHREAD_MUTEX_INITIALIZER;
 #endif
 #define lock_signal()     mutex_lock(&mutex_dynarec_prot)
 #define unlock_signal()   mutex_unlock(&mutex_dynarec_prot)
@@ -1876,7 +1879,7 @@ void box64_abort() {
             char **strings;
             x64emu_t* emu = thread_get_emu();
 
-#ifndef ANDROID
+#ifdef USE_BACKTRACE
             nptrs = backtrace(buffer, BT_BUF_SIZE);
             strings = backtrace_symbols(buffer, nptrs);
             if(strings) {
@@ -1917,8 +1920,17 @@ static void atfork_child_dynarec_prot(void)
     #ifdef USE_CUSTOM_MUTEX
     native_lock_store(&mutex_dynarec_prot, 0);
     #else
+    #ifdef PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP
     pthread_mutex_t tmp = PTHREAD_ERRORCHECK_MUTEX_INITIALIZER_NP;
     memcpy(&mutex_dynarec_prot, &tmp, sizeof(mutex_dynarec_prot));
+    #else
+    pthread_mutex_t tmp = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ERRORCHECK);
+    pthread_mutex_init(&mutex_dynarec_prot, &attr);
+    pthread_mutexattr_destroy(&attr);
+    #endif
     #endif
 }
 #endif

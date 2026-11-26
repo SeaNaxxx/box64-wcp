@@ -66,6 +66,9 @@ uintptr_t box64_pagesize;
 path_collection_t box64_addlibs = {0};
 int box64_is32bits = 0;
 int box64_isAddressSpace32 = 0;
+#ifndef ARM64
+int box64_ymm_split = 0;
+#endif
 int box64_rdtsc = 0;
 uint8_t box64_rdtsc_shift = 0;
 int box64_mapclean = 0;
@@ -210,6 +213,19 @@ void computeRDTSC()
     printf_log_prefix(0, LOG_INFO, "\n");
 }
 
+static void SetYmmMode(void)
+{
+    #ifdef ARM64
+    printf_log(LOG_DEBUG, "Using separate xmm/ymm registers\n");
+    #elif defined(RV64)
+    box64_ymm_split = 0;
+    printf_log(LOG_DEBUG, "Using unified xmm/ymm registers\n");
+    #else
+    box64_ymm_split = BOX64ENV(dynarec) ? 1 : 0;
+    printf_log(LOG_DEBUG, "Using %s xmm/ymm registers\n", box64_ymm_split?"separate":"unified");
+    #endif
+}
+
 static void displayMiscInfo(void)
 {
     openFTrace();
@@ -237,6 +253,7 @@ static void displayMiscInfo(void)
     }
 #endif
 #endif
+    SetYmmMode();
 
     printf_log(LOG_INFO, "Running on %s with %d core%s, pagesize: %zd", box64_sysinfo.cpuname, box64_sysinfo.ncpu, box64_sysinfo.ncpu > 1 ? "s" : "", box64_pagesize);
     if (BOX64ENV(maxcpu))

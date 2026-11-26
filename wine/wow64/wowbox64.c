@@ -267,6 +267,8 @@ NTSTATUS WINAPI BTCpuProcessInit(void)
         SET_BOX64ENV(dynarec, 0);
     }
 
+    printf_log(LOG_DEBUG, "Using separate xmm/ymm registers\n");
+
     TCHAR filename[MAX_PATH];
     if (GetModuleFileNameA(NULL, filename, MAX_PATH)) {
         char* shortname = strrchr(filename, '\\');

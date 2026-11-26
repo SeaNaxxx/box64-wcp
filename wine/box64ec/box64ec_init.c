@@ -77,6 +77,8 @@ NTSTATUS WINAPI ProcessInit(void)
     DetectHostCpuFeatures();
 #endif
 
+    printf_log(LOG_DEBUG, "Using separate xmm/ymm registers\n");
+
     NTSTATUS status = Box64EC_InitSyscalls();
     if (status)
         return status;
