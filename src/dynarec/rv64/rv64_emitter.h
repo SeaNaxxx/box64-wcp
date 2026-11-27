@@ -971,6 +971,8 @@
 #define FCVTSD(frd, frs1) EMIT(R_type(0b0100000, 0b00001, frs1, 0b111, frd, 0b1010011))
 // Convert Single frs1 to Double frd
 #define FCVTDS(frd, frs1) EMIT(R_type(0b0100001, 0b00000, frs1, 0b111, frd, 0b1010011))
+#define FROUNDS(frd, frs1, rm, nx) EMIT(R_type(0b0100000, 4 | (nx), frs1, rm, frd, 0b1010011))
+#define FROUNDD(frd, frs1, rm, nx) EMIT(R_type(0b0100001, 4 | (nx), frs1, rm, frd, 0b1010011))
 // Convert from Double to signed 32bits
 #define FCVTWD(rd, frs1, rm) EMIT(R_type(0b1100001, 0b00000, frs1, rm, rd, 0b1010011))
 // Convert from Double to unsigned 32bits
@@ -2105,7 +2107,7 @@
 #define VMSIF_M(vd, vs2, vm)  EMIT(R_type((cpuext.xtheadvector ? 0b0101100 : 0b0101000) | (vm), vs2, 0b00011, 0b010, vd, 0b1010111)) // 010100......00011010.....1010111
 #define VIOTA_M(vd, vs2, vm)  EMIT(R_type((cpuext.xtheadvector ? 0b0101100 : 0b0101000) | (vm), vs2, 0b10000, 0b010, vd, 0b1010111)) // 010100......10000010.....1010111
 #define VCPOP_M(rd, vs2, vm)  EMIT(R_type((cpuext.xtheadvector ? 0b0101100 : 0b0100000) | (vm), vs2, 0b10000, 0b010, rd, 0b1010111)) // 010000......10000010.....1010111
-#define VFIRST_M(rd, vs2, vm) EMIT(R_type((cpuext.xtheadvector ? 0b0101100 : 0b0100000) | (vm), vs2, 0b10001, 0b010, rd, 0b1010111)) // 010000......10001010.....1010111
+#define VFIRST_M(rd, vs2, vm) EMIT(R_type((cpuext.xtheadvector ? 0b0101010 : 0b0100000) | (vm), vs2, cpuext.xtheadvector ? 0 : 0b10001, 0b010, rd, 0b1010111)) // 010000......10001010.....1010111
 
 #define VID_V(vd, vm) EMIT(R_type((cpuext.xtheadvector ? 0b0101100 : 0b0101000) | (vm), 0b00000, 0b10001, 0b010, vd, 0b1010111)) // 010100.0000010001010.....1010111
 

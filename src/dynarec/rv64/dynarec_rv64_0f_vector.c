@@ -506,27 +506,31 @@ uintptr_t dynarec64_0F_vector(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip,
                         GETEM_vector(q1, 0);
                         SET_ELEMENT_WIDTH(x1, VECTOR_SEW32);
                     }
-                    VMSLT_VX(VMASK, q1, xZR, VECTOR_UNMASKED);
-                    VRSUB_VX(q0, q0, xZR, VECTOR_MASKED);
-                    VMSEQ_VX(VMASK, q1, xZR, VECTOR_UNMASKED);
-                    VXOR_VV(q0, q0, q0, VECTOR_MASKED);
+                    if (q0 == q1) {
+                        int negated = vpu_get_scratch(dyn);
+                        VRSUB_VX(negated, q0, xZR, VECTOR_UNMASKED);
+                        VMAX_VV(q0, q0, negated, VECTOR_UNMASKED);
+                    } else {
+                        VMSLT_VX(VMASK, q1, xZR, VECTOR_UNMASKED);
+                        VRSUB_VX(q0, q0, xZR, VECTOR_MASKED);
+                        VMSEQ_VX(VMASK, q1, xZR, VECTOR_UNMASKED);
+                        VXOR_VV(q0, q0, q0, VECTOR_MASKED);
+                    }
                     break;
-                case 0x0B:
+                case 0x0B: {
                     INST_NAME("PMULHRSW Gm, Em");
                     nextop = F8;
                     GETGM_vector(q0);
-                    SET_ELEMENT_WIDTH(x1, VECTOR_SEW64);
+                    if (!MODREG) { SET_ELEMENT_WIDTH(x1, VECTOR_SEW64); }
                     GETEM_vector(q1, 0);
-                    SET_ELEMENT_WIDTH(x1, VECTOR_SEW16);
-                    v0 = vpu_get_scratch_lmul(dyn, VECTOR_LMUL2);
-                    vpu_get_scratch(dyn);
-                    VWMUL_VV(v0, q1, q0, VECTOR_UNMASKED);
-                    rvv_set_vl_for_width(dyn, ninst, x1, VECTOR_SEW32, VECTOR_LMUL1, 16);
-                    VSRL_VI(v0, v0, 14, VECTOR_UNMASKED);
-                    VADD_VI(v0, v0, 1, VECTOR_UNMASKED);
-                    rvv_set_vl_for_width(dyn, ninst, x1, VECTOR_SEW16, VECTOR_LMUL1, 16);
-                    VNSRL_WI(q0, v0, 1, VECTOR_UNMASKED);
+                    int products = vpu_get_scratch_lmul(dyn, VECTOR_LMUL2);
+                    rvv_set_vl_for_width(dyn, ninst, x1, VECTOR_SEW16, VECTOR_LMUL1, 8);
+                    MOV32w(x4, 1 << 14);
+                    VWMUL_VV(products, q0, q1, VECTOR_UNMASKED);
+                    VWADD_WX(products, products, x4, VECTOR_UNMASKED);
+                    VNSRL_WI(q0, products, 15, VECTOR_UNMASKED);
                     break;
+                }
                 case 0x1C:
                     INST_NAME("PABSB Gm, Em");
                     nextop = F8;
@@ -747,6 +751,26 @@ uintptr_t dynarec64_0F_vector(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip,
             if (!BOX64ENV(dynarec_fastnan)) return 0;
             INST_NAME("CVTPS2PD Gx, Ex");
             nextop = F8;
+            if (!cpuext.xtheadvector) {
+                if (MODREG) {
+                    v1 = simd_access(dyn, ninst, x1, (nextop & 7) + (rex.b << 3), SIMD_LO64, 0);
+                } else {
+                    SMREAD();
+                    addr = geted(dyn, addr, ninst, nextop, &ed, x1, x2, &fixedaddress, rex, NULL, 0, 0);
+                    v1 = vpu_get_scratch(dyn);
+                    rvv_set_vl_for_width(dyn, ninst, x1, VECTOR_SEW32, VECTOR_LMULF2, 8);
+                    VLE32_V(v1, ed, VECTOR_UNMASKED, VECTOR_NFIELD1);
+                }
+                GETGX_empty_vector(v0);
+                if (v1 == v0) {
+                    int input = vpu_get_scratch(dyn);
+                    VMV1R_V(input, v1);
+                    v1 = input;
+                }
+                rvv_set_vl_for_width(dyn, ninst, x1, VECTOR_SEW32, VECTOR_LMULF2, 8);
+                VFWCVT_F_F_V(v0, v1, VECTOR_UNMASKED);
+                break;
+            }
             SET_ELEMENT_WIDTH(x1, VECTOR_SEW64);
             if (MODREG) {
                 v1 = simd_get_reg(dyn, ninst, x1, (nextop & 7) + (rex.b << 3), 0, VECTOR_SEW64);
@@ -1244,17 +1268,37 @@ uintptr_t dynarec64_0F_vector(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip,
                 LHU(gd, ed, u8 * 2);
             }
             break;
-        case 0xC6:
+        case 0xC6: {
             INST_NAME("SHUFPS Gx, Ex, Ib");
             nextop = F8;
             SET_ELEMENT_WIDTH(x1, VECTOR_SEW32);
             GETGX_vector(v0, 1, VECTOR_SEW32);
             GETEX_vector(v1, 0, 1, VECTOR_SEW32);
             u8 = F8;
+            if (u8 == 0xe4) {
+                if (v0 != v1) {
+                    SET_ELEMENT_WIDTH(x1, VECTOR_SEW64);
+                    VECTOR_LOAD_VMASK(2, x4);
+                    VMERGE_VVM(v0, v0, v1);
+                }
+                break;
+            }
+            if (u8 == 0x44) {
+                SET_ELEMENT_WIDTH(x1, VECTOR_SEW64);
+                VSLIDEUP_VI_SAFE(v0, v1, 1, VECTOR_UNMASKED);
+                break;
+            }
+            int first = u8 & 3;
+            if (v0 == v1 && u8 == first * 0x55) {
+                int result = vpu_get_scratch(dyn);
+                VRGATHER_VI(result, v0, first, VECTOR_UNMASKED);
+                VMV_V_V(v0, result);
+                break;
+            }
             q0 = vpu_get_scratch_lmul(dyn, VECTOR_LMUL1);
             d0 = vpu_get_scratch(dyn);
-            d1 = vpu_get_scratch(dyn);
             if (cpuext.xtheadvector) { // lack of vrgatherei16.vv
+                d1 = vpu_get_scratch(dyn);
                 q1 = vpu_get_scratch(dyn);
                 rvv_set_vl_for_width(dyn, ninst, x1, VECTOR_SEW64, VECTOR_LMUL1, 16);
                 tmp64u0 = ((((uint64_t)u8 >> 2) & 3) << 32) | (u8 & 3);
@@ -1268,19 +1312,23 @@ uintptr_t dynarec64_0F_vector(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip,
                 rvv_set_vl_for_width(dyn, ninst, x1, VECTOR_SEW32, VECTOR_LMUL1, 16);
                 VRGATHER_VV_SAFE(d0, v0, q0, VECTOR_UNMASKED);
                 VRGATHER_VV_SAFE(d1, v1, q1, VECTOR_UNMASKED);
+                VMV_V_V(v0, d0);
+                VSLIDEUP_VI_SAFE(v0, d1, 2, VECTOR_UNMASKED);
             } else {
-                tmp64u0 = ((((uint64_t)u8 >> 2) & 3) << 16) | (u8 & 3);
-                VECTOR_SPLAT_IMM(q0, tmp64u0, x4);
+                uint64_t packed_indices = first | ((uint64_t)((u8 >> 2) & 3) << 16) | ((uint64_t)((u8 >> 4) & 3) << 32) | ((uint64_t)(u8 >> 6) << 48);
+                SET_ELEMENT_WIDTH(x1, VECTOR_SEW64);
+                MOV64x(x4, packed_indices);
+                VMV_S_X(q0, x4);
+                SET_ELEMENT_WIDTH(x1, VECTOR_SEW32);
                 VRGATHEREI16_VV(d0, v0, q0, VECTOR_UNMASKED);
-                tmp64u1 = ((((uint64_t)u8 >> 6) & 3) << 16) | ((u8 >> 4) & 3);
-                if (tmp64u1 != tmp64u0) {
-                    VECTOR_SPLAT_IMM(q0, tmp64u1, x4);
+                if (v0 != v1) {
+                    VECTOR_LOAD_VMASK(0xc, x4);
+                    VRGATHEREI16_VV(d0, v1, q0, VECTOR_MASKED);
                 }
-                VRGATHEREI16_VV(d1, v1, q0, VECTOR_UNMASKED);
+                VMV_V_V(v0, d0);
             }
-            VMV_V_V(v0, d0);
-            VSLIDEUP_VI_SAFE(v0, d1, 2, VECTOR_UNMASKED);
             break;
+        }
         case 0xD1:
         case 0xD2:
         case 0xD3:
@@ -1638,25 +1686,23 @@ uintptr_t dynarec64_0F_vector(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip,
             VADD_VV(v0, v0, v1, VECTOR_UNMASKED);
             break;
         case 0xE0:
-            INST_NAME("PAVGB Gm, Em");
+        case 0xE3: {
+            INST_NAME(opcode == 0xE0 ? "PAVGB Gm, Em" : "PAVGW Gm, Em");
             nextop = F8;
             GETGM_vector(v0);
             SET_ELEMENT_WIDTH(x1, VECTOR_SEW64);
             GETEM_vector(v1, 0);
-            SET_ELEMENT_WIDTH(x1, VECTOR_SEW8);
-            VAADDU_VV(v0, v0, v1, VECTOR_UNMASKED);
-            SET_ELEMENT_WIDTH(x1, VECTOR_SEW64);
+            if (v0 != v1) {
+                int difference = vpu_get_scratch(dyn);
+                SET_ELEMENT_WIDTH(x1, opcode == 0xE0 ? VECTOR_SEW8 : VECTOR_SEW16);
+                VXOR_VV(difference, v0, v1, VECTOR_UNMASKED);
+                VOR_VV(v0, v0, v1, VECTOR_UNMASKED);
+                VSRL_VI(difference, difference, 1, VECTOR_UNMASKED);
+                VSUB_VV(v0, v0, difference, VECTOR_UNMASKED);
+                SET_ELEMENT_WIDTH(x1, VECTOR_SEW64);
+            }
             break;
-        case 0xE3:
-            INST_NAME("PAVGW Gm, Em");
-            nextop = F8;
-            GETGM_vector(v0);
-            SET_ELEMENT_WIDTH(x1, VECTOR_SEW64);
-            GETEM_vector(v1, 0);
-            SET_ELEMENT_WIDTH(x1, VECTOR_SEW16);
-            VAADDU_VV(v0, v0, v1, VECTOR_UNMASKED);
-            SET_ELEMENT_WIDTH(x1, VECTOR_SEW64);
-            break;
+        }
         case 0xEA:
             INST_NAME("PMINSW Gm, Em");
             nextop = F8;
@@ -1710,11 +1756,8 @@ uintptr_t dynarec64_0F_vector(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t ip,
             GETEM_vector(q1, 0);
             SET_ELEMENT_WIDTH(x1, VECTOR_SEW8);
             rvv_set_vl_for_width(dyn, ninst, x1, VECTOR_SEW8, VECTOR_LMUL1, 8);
-            q2 = vpu_get_scratch(dyn);
             VMSLT_VX(VMASK, q1, xZR, VECTOR_UNMASKED);
-            VLE8_V(q2, xRDI, VECTOR_UNMASKED, VECTOR_NFIELD1);
-            VMERGE_VVM(q2, q2, q0);
-            VSE8_V(q2, xRDI, VECTOR_UNMASKED, VECTOR_NFIELD1);
+            VSE8_V(q0, xRDI, VECTOR_MASKED, VECTOR_NFIELD1);
             SMWRITE2();
             break;
         case 0x19:

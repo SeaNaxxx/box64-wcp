@@ -80,43 +80,38 @@ uintptr_t dynarec64_F30F_vector(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
             }
             break;
         case 0x12:
-            INST_NAME("MOVSLDUP Gx, Ex");
+        case 0x16: {
+            int duplicate_high = opcode == 0x16;
+            INST_NAME(duplicate_high ? "MOVSHDUP Gx, Ex" : "MOVSLDUP Gx, Ex");
             nextop = F8;
-            SET_ELEMENT_WIDTH(x1, VECTOR_SEW64);
-            if (MODREG) {
-                q1 = simd_get_reg(dyn, ninst, x1, (nextop & 7) + (rex.b << 3), 0, VECTOR_SEW64);
+            if (cpuext.xtheadvector || !MODREG) {
+                SET_ELEMENT_WIDTH(x1, VECTOR_SEW64);
+                GETEX_vector(q1, 0, 0, VECTOR_SEW64);
+                GETGX_empty_vector(q0);
+                ADDI(x4, xZR, 32);
+                v0 = vpu_get_scratch(dyn);
+                if (duplicate_high) {
+                    VSRL_VX(q0, q1, x4, VECTOR_UNMASKED);
+                    VSLL_VX(v0, q0, x4, VECTOR_UNMASKED);
+                } else {
+                    VSLL_VX(q0, q1, x4, VECTOR_UNMASKED);
+                    VSRL_VX(v0, q0, x4, VECTOR_UNMASKED);
+                }
+                VOR_VV(q0, q0, v0, VECTOR_UNMASKED);
             } else {
-                SMREAD();
-                addr = geted(dyn, addr, ninst, nextop, &ed, x1, x2, &fixedaddress, rex, NULL, 0, 0);
-                q1 = vpu_get_scratch(dyn);
-                VLE64_V(q1, ed, VECTOR_UNMASKED, VECTOR_NFIELD1);
+                GETEX_vector(q1, 0, 0, VECTOR_SEW32);
+                GETGX_empty_vector(q0);
+                if (q0 != q1) VMV_V_V(q0, q1);
+                VECTOR_LOAD_VMASK(duplicate_high ? 0x5 : 0xa, x4);
+                if (duplicate_high) {
+                    VSLIDEDOWN_VI(q0, q1, 1, VECTOR_MASKED);
+                } else {
+                    VEC_SRC_KEEP(q1, q0);
+                    VSLIDEUP_VI(q0, q1, 1, VECTOR_MASKED);
+                }
             }
-            GETGX_empty_vector(q0);
-            ADDI(x4, xZR, 32);
-            v0 = vpu_get_scratch(dyn);
-            VSLL_VX(q0, q1, x4, VECTOR_UNMASKED);
-            VSRL_VX(v0, q0, x4, VECTOR_UNMASKED);
-            VOR_VV(q0, q0, v0, VECTOR_UNMASKED);
             break;
-        case 0x16:
-            INST_NAME("MOVSHDUP Gx, Ex");
-            nextop = F8;
-            SET_ELEMENT_WIDTH(x1, VECTOR_SEW64);
-            if (MODREG) {
-                q1 = simd_get_reg(dyn, ninst, x1, (nextop & 7) + (rex.b << 3), 0, VECTOR_SEW64);
-            } else {
-                SMREAD();
-                addr = geted(dyn, addr, ninst, nextop, &ed, x1, x2, &fixedaddress, rex, NULL, 0, 0);
-                q1 = vpu_get_scratch(dyn);
-                VLE64_V(q1, ed, VECTOR_UNMASKED, VECTOR_NFIELD1);
-            }
-            GETGX_empty_vector(q0);
-            ADDI(x4, xZR, 32);
-            v0 = vpu_get_scratch(dyn);
-            VSRL_VX(q0, q1, x4, VECTOR_UNMASKED);
-            VSLL_VX(v0, q0, x4, VECTOR_UNMASKED);
-            VOR_VV(q0, q0, v0, VECTOR_UNMASKED);
-            break;
+        }
         case 0x1E:
             return 0;
         case 0x2A:
@@ -432,30 +427,51 @@ uintptr_t dynarec64_F30F_vector(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
                 VLE_V(v0, ed, VECTOR_SEW8, VECTOR_UNMASKED, VECTOR_NFIELD1);
             }
             break;
-        case 0x70:
+        case 0x70: {
             INST_NAME("PSHUFHW Gx, Ex, Ib");
             nextop = F8;
-            SET_ELEMENT_WIDTH(x1, VECTOR_SEW16);
-            GETEX_vector(v1, 0, 1, VECTOR_SEW16);
-            GETGX_vector(v0, 1, VECTOR_SEW16);
-            u8 = F8;
-            d0 = vpu_get_scratch(dyn);
-            d1 = vpu_get_scratch(dyn);
-            rvv_set_vl_for_width(dyn, ninst, x1, VECTOR_SEW64, VECTOR_LMUL1, 16);
-            tmp64u0 = ((((uint64_t)u8 >> 6) & 3) << 48) | ((((uint64_t)u8 >> 4) & 3) << 32) | (((u8 >> 2) & 3) << 16) | (u8 & 3);
-            tmp64u0 += 0x0004000400040004ULL;
-            MOV64xs(x5, tmp64u0, x3);
-            VMV_S_X(d1, x5);
-            tmp64u0 = 0x0003000200010000ULL;
-            MOV64x(x5, tmp64u0);
-            VSLIDE1UP_VX_SAFE(d0, d1, x5, VECTOR_UNMASKED);
-            rvv_set_vl_for_width(dyn, ninst, x1, VECTOR_SEW16, VECTOR_LMUL1, 16);
-            if (v0 == v1) {
-                v1 = vpu_get_scratch(dyn);
-                VMV_V_V(v1, v0);
+            if (!cpuext.xtheadvector && MODREG) {
+                ed = (nextop & 7) + (rex.b << 3);
+                if (PK(0) == 0xe4) {
+                    ++addr;
+                    gd = ((nextop >> 3) & 7) + (rex.r << 3);
+                    simd_copy(dyn, ninst, x1, gd, ed, 16, 0);
+                    break;
+                }
+                v1 = simd_access(dyn, ninst, x1, ed, SIMD_XMM, 0);
+            } else {
+                SET_ELEMENT_WIDTH(x1, VECTOR_SEW16);
+                GETEX_vector(v1, 0, 1, VECTOR_SEW16);
             }
-            VRGATHER_VV_SAFE(v0, v1, d0, VECTOR_UNMASKED);
+            if (cpuext.xtheadvector) {
+                GETGX_vector(v0, 1, VECTOR_SEW16);
+            } else {
+                GETGX_empty_vector(v0);
+            }
+            uint8_t control = F8;
+            int indices = vpu_get_scratch(dyn);
+            if (cpuext.xtheadvector) {
+                int upper_indices = vpu_get_scratch(dyn);
+                uint64_t upper_words = 0x0004000400040004ULL | (control & 3) | ((uint64_t)((control >> 2) & 3) << 16) | ((uint64_t)((control >> 4) & 3) << 32) | ((uint64_t)(control >> 6) << 48);
+                SET_ELEMENT_WIDTH(x1, VECTOR_SEW64);
+                MOV64xs(x5, upper_words, x3);
+                VMV_S_X(upper_indices, x5);
+                MOV64x(x5, 0x0003000200010000ULL);
+                VSLIDE1UP_VX(indices, upper_indices, x5, VECTOR_UNMASKED);
+                SET_ELEMENT_WIDTH(x1, VECTOR_SEW16);
+            } else {
+                uint32_t selectors = (control & 3) | (((control >> 2) & 3) << 8) | (((control >> 4) & 3) << 16) | ((control >> 6) << 24);
+                uint64_t packed = ((uint64_t)(selectors | 0x04040404U) << 32) | 0x03020100U;
+                int byte_indices = vpu_get_scratch(dyn);
+                rvv_set_vl_for_width(dyn, ninst, x1, VECTOR_SEW64, VECTOR_LMUL1, 8);
+                MOV64xs(x4, packed, x3);
+                VMV_S_X(byte_indices, x4);
+                SET_ELEMENT_WIDTH(x1, VECTOR_SEW16);
+                VZEXT_VF2(indices, byte_indices, VECTOR_UNMASKED);
+            }
+            VRGATHER_VV_SAFE(v0, v1, indices, VECTOR_UNMASKED);
             break;
+        }
         case 0x7E:
             INST_NAME("MOVQ Gx, Ex");
             nextop = F8;
@@ -512,6 +528,26 @@ uintptr_t dynarec64_F30F_vector(dynarec_rv64_t* dyn, uintptr_t addr, uintptr_t i
         case 0xE6:
             INST_NAME("CVTDQ2PD Gx, Ex");
             nextop = F8;
+            if (!cpuext.xtheadvector) {
+                if (MODREG) {
+                    v1 = simd_access(dyn, ninst, x1, (nextop & 7) + (rex.b << 3), SIMD_LO64, 0);
+                } else {
+                    SMREAD();
+                    addr = geted(dyn, addr, ninst, nextop, &ed, x1, x2, &fixedaddress, rex, NULL, 0, 0);
+                    v1 = vpu_get_scratch(dyn);
+                    rvv_set_vl_for_width(dyn, ninst, x1, VECTOR_SEW32, VECTOR_LMULF2, 8);
+                    VLE32_V(v1, ed, VECTOR_UNMASKED, VECTOR_NFIELD1);
+                }
+                GETGX_empty_vector(v0);
+                if (v1 == v0) {
+                    int input = vpu_get_scratch(dyn);
+                    VMV1R_V(input, v1);
+                    v1 = input;
+                }
+                rvv_set_vl_for_width(dyn, ninst, x1, VECTOR_SEW32, VECTOR_LMULF2, 8);
+                VFWCVT_F_X_V(v0, v1, VECTOR_UNMASKED);
+                break;
+            }
             SET_ELEMENT_WIDTH(x1, VECTOR_SEW64);
             if (MODREG) {
                 v1 = simd_get_reg(dyn, ninst, x1, (nextop & 7) + (rex.b << 3), 0, VECTOR_SEW64);
