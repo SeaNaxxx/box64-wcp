@@ -285,10 +285,12 @@ static inline int xmm_scalar_begin(dynarec_la64_t* dyn, int ninst, xmm_scalar_t*
 
 static inline void xmm_scalar_end(dynarec_la64_t* dyn, int ninst, const xmm_scalar_t* scalar)
 {
+    if (scalar->renamed) {
+        xmm_scalar_merge(dyn, ninst, scalar->guest_dst);
+        return;
+    }
     dyn->lsx.ssecache[scalar->guest_dst].write = 1;
     dyn->lsx.lsxcache[scalar->host_dst].t = LSX_CACHE_XMMW;
-    if (scalar->renamed)
-        return;
     if (scalar->host_dst == scalar->result)
         return;
     if (scalar->upper_policy == XMM_UPPER_CLEAR && !scalar->preserved_dead)
